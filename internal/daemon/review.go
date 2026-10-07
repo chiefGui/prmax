@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -62,6 +63,8 @@ type job struct {
 	repo     config.Repo
 	review   model.Review
 	reported []model.Finding
+	since    time.Time
+	warned   map[string]bool
 }
 
 func (d *Daemon) runReview(ctx context.Context, key string, req model.ReviewRequest) {
@@ -92,6 +95,7 @@ func (d *Daemon) runReview(ctx context.Context, key string, req model.ReviewRequ
 		Provider:   req.Provider,
 		Model:      req.Model,
 		Effort:     req.Effort,
+		Access:     req.Access,
 		ModelLabel: d.label(req.Provider, req.Model, req.Effort),
 		Round:      rounds(p) + 1,
 		HeadSHA:    p.HeadSHA,
@@ -105,7 +109,7 @@ func (d *Daemon) runReview(ctx context.Context, key string, req model.ReviewRequ
 			trimReviews(cur)
 		}
 	})
-	d.logf(j, "info", "review %s at %s with %s", p.Key(), short(p.HeadSHA), j.review.ModelLabel)
+	d.logf(j, "info", "review %s at %s with %s, %s access", p.Key(), short(p.HeadSHA), j.review.ModelLabel, j.review.Access)
 
 	err := d.execute(ctx, j)
 	j.review.FinishedAt = time.Now()
@@ -180,6 +184,7 @@ func (d *Daemon) execute(ctx context.Context, j *job) error {
 			j.review.Kind = model.KindIncremental
 			j.review.SinceSHA = p.ReviewedSHA
 			j.reported = prev.Findings
+			j.since = prev.FinishedAt
 		} else {
 			d.logf(j, "info", "previous review commit %s is gone (force push?), doing a full review", short(p.ReviewedSHA))
 		}
@@ -189,6 +194,9 @@ func (d *Daemon) execute(ctx context.Context, j *job) error {
 	prompt, err := d.prompt(ctx, j, wt, baseSHA)
 	if err != nil {
 		return err
+	}
+	if err := os.WriteFile(d.store.PromptPath(j.review.ID), []byte(prompt), 0o644); err != nil {
+		d.logf(j, "error", "save prompt: %v", err)
 	}
 	var res *reviewResult
 	if j.review.Provider == "codex" {
@@ -241,8 +249,11 @@ func (d *Daemon) claude(ctx context.Context, j *job, dir, prompt string) (*revie
 		"--verbose",
 		"--no-session-persistence",
 		"--json-schema", reviewSchema,
-		"--tools", "Read,Grep,Glob,Bash",
-		"--allowedTools", strings.Join(allowedTools, ","),
+	}
+	if j.review.Access == model.AccessReadOnly {
+		args = append(args, "--tools", "Read,Grep,Glob,Bash", "--allowedTools", strings.Join(allowedTools, ","))
+	} else {
+		args = append(args, "--dangerously-skip-permissions")
 	}
 	if j.review.Model != "" {
 		args = append(args, "--model", j.review.Model)
@@ -475,4 +486,38 @@ func (l *limitedWriter) Write(p []byte) (int, error) {
 	l.n -= k
 	l.w.Write(p[:k])
 	return len(p), nil
+}
+
+func (d *Daemon) repost(key string) {
+	p, ok := d.store.Get(key)
+	if !ok {
+		return
+	}
+	r := lastCompleted(p)
+	if r == nil || r.CommentURL != "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(d.ctx, time.Minute)
+	defer cancel()
+	url, err := d.postComment(ctx, p.Repo, p.Number, renderComment(*r))
+	d.store.Update(func(prs map[string]*model.PR) {
+		cur, ok := prs[key]
+		if !ok {
+			return
+		}
+		for i := range cur.Reviews {
+			if cur.Reviews[i].ID != r.ID {
+				continue
+			}
+			if err != nil {
+				cur.Reviews[i].Error = "comment not posted: " + err.Error()
+			} else {
+				cur.Reviews[i].CommentURL = url
+				cur.Reviews[i].Error = ""
+			}
+		}
+	})
+	if err != nil {
+		log.Printf("repost %s: %v", key, err)
+	}
 }

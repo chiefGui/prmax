@@ -94,8 +94,18 @@ func (d *Daemon) postComment(ctx context.Context, repo string, number int, body 
 	if err != nil {
 		return "", err
 	}
-	out, err := run(ctx, "", env, body, d.cfg.GhPath, "pr", "comment", fmt.Sprint(number), "-R", repo, "--body-file", "-")
-	return strings.TrimSpace(out), err
+	endpoint := fmt.Sprintf("repos/%s/issues/%d/comments", repo, number)
+	for attempt := 1; ; attempt++ {
+		out, err := run(ctx, "", env, body, d.cfg.GhPath, "api", "-X", "POST", endpoint, "-F", "body=@-", "--jq", ".html_url")
+		if err == nil || attempt == 3 || ctx.Err() != nil {
+			return strings.TrimSpace(out), err
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(time.Duration(attempt) * 2 * time.Second):
+		}
+	}
 }
 
 func setHead(p *model.PR, sha string) {

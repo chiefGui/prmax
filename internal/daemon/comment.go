@@ -10,7 +10,7 @@ import (
 
 func renderComment(r model.Review) string {
 	var b strings.Builder
-	meta := fmt.Sprintf("Round %d · [`%s`](https://github.com/%s/commit/%s)", r.Round, short(r.HeadSHA), r.Repo, r.HeadSHA)
+	meta := fmt.Sprintf("[Round %d](https://github.com/%s/commit/%s)", r.Round, r.Repo, r.HeadSHA)
 	if r.SinceSHA != "" {
 		meta += fmt.Sprintf(" · since `%s`", short(r.SinceSHA))
 	}

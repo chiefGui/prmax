@@ -38,7 +38,7 @@ func loadChoice() model.Choice {
 	return c
 }
 
-func saveChoice(provider, mdl, effort string) {
+func saveChoice(provider, mdl, effort, access string) {
 	choiceMu.Lock()
 	defer choiceMu.Unlock()
 	c := loadChoice()
@@ -46,6 +46,9 @@ func saveChoice(provider, mdl, effort string) {
 	c.Models[provider] = mdl
 	if effort != "" {
 		c.Efforts[provider] = effort
+	}
+	if access != "" {
+		c.Access = access
 	}
 	b, _ := json.MarshalIndent(c, "", "  ")
 	os.WriteFile(choicePath(), b, 0o644)
@@ -63,6 +66,9 @@ func (d *Daemon) providers() model.Providers {
 			{ID: "codex", Label: "Codex", Models: codex, Default: def},
 		},
 		Choice: loadChoice(),
+	}
+	if out.Choice.Access == "" {
+		out.Choice.Access = model.AccessFull
 	}
 	if out.Choice.Provider == "" {
 		out.Choice.Provider = "claude"
@@ -154,20 +160,19 @@ func codexDefault() string {
 }
 
 func (d *Daemon) label(provider, id, effort string) string {
-	name := provider + " " + id
+	name := id
 	for _, p := range d.providers().List {
 		if p.ID != provider {
 			continue
 		}
-		name = p.Label + " " + id
 		for _, m := range p.Models {
 			if m.ID == id {
-				name = p.Label + " " + m.Label
+				name = m.Label
 			}
 		}
 	}
 	if effort != "" {
-		name += " (" + effort + ")"
+		name += " · " + effort
 	}
 	return name
 }

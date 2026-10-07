@@ -15,17 +15,18 @@ type openConfirmMsg struct{ pr model.PR }
 type providersMsg struct{ p model.Providers }
 
 type confirmState struct {
-	pr    model.PR
-	ready bool
-	list  []model.Provider
-	pick  map[string]string
-	effs  map[string]string
-	prov  int
-	mdl   int
-	eff   int
-	field int
-	plan  *model.Plan
-	err   string
+	pr     model.PR
+	ready  bool
+	list   []model.Provider
+	pick   map[string]string
+	effs   map[string]string
+	prov   int
+	mdl    int
+	eff    int
+	field  int
+	plan   *model.Plan
+	err    string
+	access string
 }
 
 type planMsg struct {
@@ -36,6 +37,7 @@ type planMsg struct {
 
 func (c *confirmState) init(p model.Providers) {
 	c.list = p.List
+	c.access = p.Choice.Access
 	c.pick = map[string]string{}
 	for k, v := range p.Choice.Models {
 		c.pick[k] = v
@@ -106,6 +108,7 @@ func (c *confirmState) request() (model.ReviewRequest, bool) {
 	if effs := c.efforts(); c.eff < len(effs) {
 		req.Effort = effs[c.eff]
 	}
+	req.Access = model.AccessModes[c.accessIdx()]
 	return req, true
 }
 
@@ -169,7 +172,7 @@ func (c *confirmState) planLines(width int) []string {
 	} else if len(pl.Commits) > 1 {
 		commits = "these " + commits
 	}
-	summary := "Reviews " + commits
+	summary := "Reviews the whole PR, starting with " + commits
 	if pl.SinceIssues > 0 {
 		summary += fmt.Sprintf(" and re-checks the %s.", issues)
 	} else {
@@ -189,7 +192,7 @@ func (m Model) keyConfirm(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up", "k", "shift+tab":
 		c.field = max(0, c.field-1)
 	case "down", "j", "tab":
-		c.field = min(2, c.field+1)
+		c.field = min(3, c.field+1)
 	case "left", "h":
 		c.move(-1)
 	case "right", "l":
@@ -218,6 +221,11 @@ func (c *confirmState) move(d int) {
 	if c.field == 0 {
 		c.prov = (c.prov + d + len(c.list)) % len(c.list)
 		c.syncModel()
+		return
+	}
+	if c.field == 3 {
+		n := len(model.AccessModes)
+		c.access = model.AccessModes[(c.accessIdx()+d+n)%n]
 		return
 	}
 	if c.field == 2 {
@@ -266,6 +274,7 @@ func (m Model) viewConfirm() string {
 		b.WriteString(optionRow("Provider", provs, c.prov, c.field == 0, inner) + "\n")
 		b.WriteString(optionRow("Model", mdls, c.mdl, c.field == 1, inner) + "\n")
 		b.WriteString(optionRow("Effort", c.efforts(), c.eff, c.field == 2, inner) + "\n")
+		b.WriteString(optionRow("Access", model.AccessModes, c.accessIdx(), c.field == 3, inner) + "\n")
 	}
 	b.WriteString("\n" + keys("enter", "review", "←→", "change", "↑↓", "field", "esc", "cancel"))
 
@@ -335,4 +344,13 @@ func optionRow(label string, opts []string, sel int, focused bool, width int) st
 		row += sFaint.Render(" ›")
 	}
 	return mark + lab + row
+}
+
+func (c *confirmState) accessIdx() int {
+	for i, a := range model.AccessModes {
+		if a == c.access {
+			return i
+		}
+	}
+	return 0
 }

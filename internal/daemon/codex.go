@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"prmax/internal/config"
+	"prmax/internal/model"
 	"prmax/internal/proc"
 )
 
@@ -43,11 +44,13 @@ func (d *Daemon) codex(ctx context.Context, j *job, dir, prompt string) (*review
 		"exec",
 		"--json",
 		"--skip-git-repo-check",
-		"--sandbox", "read-only",
 		"-c", `approval_policy="never"`,
 		"--output-schema", schema,
 		"-o", last,
 		"-C", dir,
+	}
+	if j.review.Access == model.AccessReadOnly {
+		args = append(args, "--sandbox", "read-only")
 	}
 	if j.review.Model != "" {
 		args = append(args, "-m", j.review.Model)
@@ -146,7 +149,14 @@ func (d *Daemon) renderCodexEvent(j *job, ev map[string]any) string {
 		case "error":
 			msg := str(item, "message")
 			if strings.Contains(msg, "unrecognized configuration") {
-				d.logf(j, "info", "%s", strings.SplitN(msg, "\n", 2)[0])
+				msg = strings.Join(strings.Fields(msg), " ")
+				if j.warned == nil {
+					j.warned = map[string]bool{}
+				}
+				if !j.warned[msg] {
+					j.warned[msg] = true
+					d.logf(j, "info", "%s", msg)
+				}
 			} else {
 				d.logf(j, "error", "%s", msg)
 			}

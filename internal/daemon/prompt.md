@@ -1,10 +1,12 @@
-## Rules
+Goal: less code, better code.
+
+## How to review
 
 - Report only what you're 100% confident about. Verify every finding in the code.
-- Goal: less code, better code.
-- Findings concern code the PR adds or changes.
+- Read beyond the diff: callers, siblings, existing helpers.
+- Anchor every finding in code the PR adds or changes.
 - Judge against the repo's AGENTS.md / CLAUDE.md.
-- Empty categories are a valid result.
+- No findings is a valid result.
 
 ## Categories, in priority order
 
@@ -39,7 +41,10 @@ Docs
 
 ## Findings
 
-Each: a title of two to five words, then one or two sentences: the problem, the change, and its value. No hedging.
+- One root cause, one finding, under its highest-priority category.
+- State the problem, its root cause and its cost, including knock-on effects.
+- Propose a fix only when it reuses or removes existing code.
+- Title: two to five words. No hedging.
 
 ## PR
 
@@ -49,9 +54,18 @@ Intent: {{.Title}}
 {{.Description}}
 {{- end}}
 
-The PR head is checked out here.
+The PR head is checked out here. Changes: {{.Range}}
 {{- if .Since}}
-Last reviewed at {{.Since}}. Review only what changed since: {{.Range}}
+
+Last reviewed at {{.Since}}. Changed since:
+
+<changed>
+{{.ChangedCommits}}
+
+{{.ChangedStat}}
+</changed>
+
+Review the whole PR; start with what changed.
 {{- if .Reported}}
 
 Already reported:
@@ -61,8 +75,16 @@ Already reported:
 
 Re-check each against HEAD. Report unfixed ones again with stillOpen set. Drop fixed ones.
 {{- end}}
-{{- else}}
-Changes: {{.Range}}
+{{- if .Discussion}}
+
+<discussion>
+{{- range .Discussion}}
+{{.}}
+{{- end}}
+</discussion>
+
+Weigh the discussion: don't re-report a finding that was convincingly rebutted.
+{{- end}}
 {{- end}}
 
 <commits>

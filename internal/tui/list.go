@@ -294,7 +294,7 @@ func (m Model) row(p model.PR, repoW, width int, sel bool) string {
 	}
 	num := sDim.Render(fmt.Sprintf("#%-4d", p.Number))
 	age := sFaint.Render(fmt.Sprintf("%4s", ago(p.UpdatedAt)))
-	infoW := 20
+	infoW := 22
 	fixed := 3 + 1 + 3 + repoW + 5 + 3 + 3 + infoW + 2 + 4 + 2
 	titleW := max(10, width-fixed)
 	titleStyle := sText

@@ -116,6 +116,12 @@ func (d *Daemon) request(key string, req model.ReviewRequest) error {
 	if req.Provider != "claude" && req.Provider != "codex" {
 		return fmt.Errorf("unknown provider %q", req.Provider)
 	}
+	if req.Access == "" {
+		req.Access = model.AccessFull
+	}
+	if req.Access != model.AccessFull && req.Access != model.AccessReadOnly {
+		return fmt.Errorf("unknown access %q", req.Access)
+	}
 	if _, ok := d.store.Get(key); !ok {
 		return fmt.Errorf("unknown pr")
 	}
@@ -128,7 +134,7 @@ func (d *Daemon) request(key string, req model.ReviewRequest) error {
 		return fmt.Errorf("already queued")
 	}
 	d.pending[key] = req
-	go saveChoice(req.Provider, req.Model, req.Effort)
+	go saveChoice(req.Provider, req.Model, req.Effort, req.Access)
 	d.setStatus(key, model.StatusQueued)
 	d.queue <- key
 	return nil

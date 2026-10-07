@@ -71,6 +71,8 @@ func (s *Store) statePath() string { return filepath.Join(s.dir, "state.json") }
 
 func (s *Store) LogPath(id string) string { return filepath.Join(s.dir, "logs", id+".jsonl") }
 
+func (s *Store) PromptPath(id string) string { return filepath.Join(s.dir, "logs", id+".prompt.md") }
+
 func (s *Store) Update(fn func(prs map[string]*model.PR)) {
 	s.mu.Lock()
 	fn(s.prs)

@@ -1,6 +1,6 @@
 {
   "listen": "127.0.0.1:47821",
-  "concurrency": 2,
+  "concurrency": 4,
   "claudePath": "claude",
   "codexPath": "codex",
   "ghPath": "gh",

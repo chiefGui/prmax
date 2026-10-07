@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -48,6 +49,10 @@ func (d *Daemon) routes(shutdown context.CancelFunc) http.Handler {
 	})
 	mux.HandleFunc("GET /api/reviews/{id}/log", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, d.store.ReadLog(r.PathValue("id")))
+	})
+	mux.HandleFunc("GET /api/reviews/{id}/prompt", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		http.ServeFile(w, r, d.store.PromptPath(filepath.Base(r.PathValue("id"))))
 	})
 	mux.HandleFunc("POST /api/prs/{owner}/{name}/{n}/{action}", d.handleAction)
 	mux.HandleFunc("GET /api/prs/{owner}/{name}/{n}/plan", func(w http.ResponseWriter, r *http.Request) {
@@ -176,6 +181,10 @@ func (d *Daemon) handleAction(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
+	case "post":
+		go d.repost(key)
+	case "nudge":
+		go d.nudge(key)
 	case "seen":
 		d.store.Update(func(m map[string]*model.PR) {
 			if p, ok := m[key]; ok {

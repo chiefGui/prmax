@@ -59,6 +59,11 @@ const (
 	viewDetail
 )
 
+type promptMsg struct {
+	id   string
+	text string
+}
+
 type logsMsg struct {
 	id    string
 	lines []model.LogLine
@@ -80,12 +85,15 @@ type Model struct {
 	view          view
 
 	key       string
+	fsel      int
 	repoIdx   int
 	filter    int
 	seen      int
 	reviewIdx int
 	tab       int
 	logs      map[string][]model.LogLine
+	prompts   map[string]string
+	wrapped   map[string]string
 	vp        viewport.Model
 	follow    bool
 
@@ -102,11 +110,13 @@ func New(client *Client) Model {
 	sp.Spinner = spinner.MiniDot
 	sp.Style = sViolet
 	return Model{
-		client: client,
-		stream: make(chan streamMsg, 1024),
-		logs:   map[string][]model.LogLine{},
-		spin:   sp,
-		follow: true,
+		client:  client,
+		stream:  make(chan streamMsg, 1024),
+		logs:    map[string][]model.LogLine{},
+		prompts: map[string]string{},
+		wrapped: map[string]string{},
+		spin:    sp,
+		follow:  true,
 	}
 }
 
@@ -163,6 +173,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, m.wait()
+
+	case promptMsg:
+		m.prompts[msg.id] = msg.text
+		m.refreshDetail()
+		return m, nil
 
 	case logsMsg:
 		live := m.logs[msg.id]
@@ -243,30 +258,48 @@ func (m Model) keyDetail(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.view = viewList
 		return m, nil
 	case "tab":
-		m.tab = 1 - m.tab
+		m.tab = (m.tab + 1) % 3
 		m.follow = true
 		m.refreshDetail()
-		return m, nil
+		return m, m.loadPrompt()
 	case "[":
 		if m.reviewIdx > 0 {
 			m.reviewIdx--
+			m.fsel = 0
 			m.follow = true
 			m.refreshDetail()
-			return m, m.loadLog()
+			return m, tea.Batch(m.loadLog(), m.loadPrompt())
 		}
 		return m, nil
 	case "]":
 		if m.reviewIdx < len(p.Reviews)-1 {
 			m.reviewIdx++
+			m.fsel = 0
 			m.follow = true
 			m.refreshDetail()
-			return m, m.loadLog()
+			return m, tea.Batch(m.loadLog(), m.loadPrompt())
 		}
 		return m, nil
 	case "c":
 		if r := m.currentReview(); r != nil && r.CommentURL != "" {
 			return m, openURL(r.CommentURL)
 		}
+		return m, nil
+	case "up", "k", "down", "j", "enter":
+		r := m.currentReview()
+		if m.tab != 0 || r == nil || len(r.Findings) == 0 {
+			break
+		}
+		fs := ordered(*r)
+		switch k.String() {
+		case "up", "k":
+			m.fsel = max(0, m.fsel-1)
+		case "down", "j":
+			m.fsel = min(len(fs)-1, m.fsel+1)
+		case "enter":
+			return m, openURL(findingURL(*r, fs[min(m.fsel, len(fs)-1)]))
+		}
+		m.refreshDetail()
 		return m, nil
 	}
 	if cmd := m.prAction(p, k.String()); cmd != nil {
@@ -292,6 +325,10 @@ func (m Model) prAction(p model.PR, key string) tea.Cmd {
 		return func() tea.Msg { return openConfirmMsg{pr: p} }
 	case "x":
 		return act("cancel", "canceled")
+	case "p":
+		return act("post", "posting comment for")
+	case "n":
+		return act("nudge", "nudging the session for")
 	case "R":
 		return act("refresh", "refreshing")
 	case "o":
@@ -304,6 +341,7 @@ func (m Model) openDetail(p model.PR) (tea.Model, tea.Cmd) {
 	m.view = viewDetail
 	m.key = p.Key()
 	m.reviewIdx = len(p.Reviews) - 1
+	m.fsel = 0
 	m.seen = len(p.Reviews)
 	m.tab = 0
 	if r := p.LastReview(); r != nil && r.Status == model.StatusReviewing {
@@ -393,9 +431,16 @@ func (m *Model) refreshDetail() {
 	case r == nil:
 		content = sDim.Render("No reviews yet.")
 	case m.tab == 0:
-		content = renderFindings(*r, w)
-	default:
+		var at int
+		content, at = renderFindings(*r, w, m.fsel)
+		m.vp.Height = max(1, m.height-m.detailChrome())
+		if at < m.vp.YOffset || at >= m.vp.YOffset+m.vp.Height-6 {
+			m.vp.SetYOffset(max(0, at-2))
+		}
+	case m.tab == 1:
 		content = renderLog(m.logs[r.ID], w)
+	default:
+		content = m.renderPrompt(r.ID, w)
 	}
 	m.vp.Height = max(1, m.height-m.detailChrome())
 	m.vp.Width = m.width
@@ -405,7 +450,7 @@ func (m *Model) refreshDetail() {
 	}
 }
 
-func (m Model) detailChrome() int { return 9 }
+func (m Model) detailChrome() int { return 10 }
 
 func (m Model) View() string {
 	if m.width == 0 {
@@ -458,13 +503,13 @@ func (m Model) statusBits(p model.PR) (string, string) {
 	case model.StatusQueued:
 		return sViolet.Render("◌"), sViolet.Render("queued")
 	case model.StatusClean:
-		return sGreen.Render("✓"), sGreen.Render("passed")
+		return sGreen.Render("✓"), sGreen.Render("passed") + notPosted(p)
 	case model.StatusFindings:
 		n := 0
 		if r := lastDone(p); r != nil {
 			n = len(r.Findings)
 		}
-		return sOrange.Render("△"), sOrange.Render(issueCount(n))
+		return sOrange.Render("△"), sOrange.Render(issueCount(n)) + notPosted(p)
 	case model.StatusFailed:
 		return sRed.Render("✕"), sRed.Render("failed")
 	case model.StatusOutdated:
@@ -491,82 +536,7 @@ func (m Model) viewDetail() string {
 	b.WriteString(m.roundsBar(p) + "\n")
 	b.WriteString(m.vp.View() + "\n")
 	b.WriteString(rule(m.width) + "\n")
-	b.WriteString(m.footer(keys("tab", "findings/log", "[ ]", "round", "c", "comment", "o", "browser", "r", "review", "x", "cancel", "esc", "back")))
-	return b.String()
-}
-
-func (m Model) roundsBar(p model.PR) string {
-	var t []string
-	for i, name := range []string{"Findings", "Log"} {
-		if i == m.tab {
-			t = append(t, sTabOn.Render(name))
-		} else {
-			t = append(t, sTab.Render(name))
-		}
-	}
-	line := "\n  " + strings.Join(t, "   ")
-	if r := m.currentReview(); r != nil {
-		parts := []string{fmt.Sprintf("%d/%d", m.reviewIdx+1, len(p.Reviews))}
-		if r.Round > 0 {
-			parts = append(parts, fmt.Sprintf("round %d", r.Round))
-		}
-		if r.SinceSHA != "" {
-			parts = append(parts, "since "+short(r.SinceSHA))
-		}
-		if r.ModelLabel != "" {
-			parts = append(parts, r.ModelLabel)
-		}
-		parts = append(parts, r.StartedAt.Local().Format("Jan 2 15:04"))
-		if !r.FinishedAt.IsZero() {
-			parts = append(parts, r.FinishedAt.Sub(r.StartedAt).Round(time.Second).String())
-		}
-		if r.CostUSD > 0 {
-			parts = append(parts, fmt.Sprintf("$%.2f", r.CostUSD))
-		}
-		line += "      " + sDim.Render(strings.Join(parts, "  ·  "))
-	}
-	return line + "\n"
-}
-
-func renderFindings(r model.Review, w int) string {
-	var b strings.Builder
-	if r.Status == model.StatusReviewing {
-		b.WriteString(" " + sTitle.Render("Review in progress. Press tab for the live log.") + "\n")
-		return b.String()
-	}
-	if r.Error != "" {
-		b.WriteString(" " + sRed.Render(lipgloss.NewStyle().Width(w-4).Render(r.Error)) + "\n\n")
-	}
-	if r.Status != model.StatusClean && r.Status != model.StatusFindings {
-		return b.String()
-	}
-	if len(r.Findings) == 0 {
-		b.WriteString(" " + sGreen.Render("No findings.") + "\n\n")
-	}
-	text := lipgloss.NewStyle().Width(w - 6)
-	for _, c := range model.Categories {
-		fs := r.ByCategory(c.ID)
-		if len(fs) == 0 {
-			continue
-		}
-		b.WriteString(" " + sBold.Render(c.Label) + "\n")
-		for _, f := range fs {
-			loc := f.File
-			if f.Line > 0 {
-				loc = fmt.Sprintf("%s:%d", f.File, f.Line)
-			}
-			head := "   " + sBold.Render(strings.TrimSpace(f.Title)) + "  " + sTitle.Render(loc)
-			if f.StillOpen {
-				head += "  " + sOrange.Render("still open")
-			}
-			b.WriteString(head + "\n")
-			b.WriteString(indent(sText.Render(text.Render(strings.TrimSpace(f.Text))), "   ") + "\n")
-		}
-		b.WriteString("\n")
-	}
-	if r.CommentURL != "" {
-		b.WriteString(" " + sDim.Render("posted: "+r.CommentURL) + "\n")
-	}
+	b.WriteString(m.footer(keys("↑↓", "finding", "enter", "open line", "tab", "view", "[ ]", "round", "r", "review", "n", "nudge", "p", "post", "esc", "back")))
 	return b.String()
 }
 
@@ -703,4 +673,43 @@ func issueCount(n int) string {
 		return "1 issue"
 	}
 	return fmt.Sprintf("%d issues", n)
+}
+
+func (m Model) loadPrompt() tea.Cmd {
+	r := m.currentReview()
+	if m.tab != 2 || r == nil {
+		return nil
+	}
+	if _, ok := m.prompts[r.ID]; ok {
+		return nil
+	}
+	id := r.ID
+	return func() tea.Msg {
+		text, err := m.client.Prompt(id)
+		if err != nil {
+			text = err.Error()
+		}
+		return promptMsg{id: id, text: text}
+	}
+}
+
+func (m Model) renderPrompt(id string, w int) string {
+	text, ok := m.prompts[id]
+	if !ok {
+		return sDim.Render(" Loading…")
+	}
+	key := fmt.Sprintf("%s|%d", id, w)
+	if s, ok := m.wrapped[key]; ok {
+		return s
+	}
+	s := lipgloss.NewStyle().Width(w - 2).Render(text)
+	m.wrapped[key] = s
+	return s
+}
+
+func notPosted(p model.PR) string {
+	if r := lastDone(p); r != nil && r.CommentURL == "" {
+		return sRed.Render(" · not posted")
+	}
+	return ""
 }
