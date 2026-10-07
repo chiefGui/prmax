@@ -57,6 +57,7 @@ type Review struct {
 	Model      string    `json:"model"`
 	Effort     string    `json:"effort"`
 	Access     string    `json:"access"`
+	Scope      string    `json:"scope,omitempty"`
 	ModelLabel string    `json:"modelLabel"`
 	Round      int       `json:"round"`
 	HeadSHA    string    `json:"headSha"`
@@ -143,6 +144,8 @@ type Choice struct {
 	Models   map[string]string `json:"models"`
 	Efforts  map[string]string `json:"efforts"`
 	Access   string            `json:"access"`
+	Scope    string            `json:"scope"`
+	Nudge    bool              `json:"nudge"`
 }
 
 type Providers struct {
@@ -155,6 +158,8 @@ type ReviewRequest struct {
 	Model    string `json:"model"`
 	Effort   string `json:"effort"`
 	Access   string `json:"access"`
+	Scope    string `json:"scope"`
+	Nudge    bool   `json:"nudge"`
 }
 
 type Commit struct {
@@ -169,6 +174,7 @@ type Plan struct {
 	SinceIssues int      `json:"sinceIssues,omitempty"`
 	Commits     []Commit `json:"commits,omitempty"`
 	Rewritten   bool     `json:"rewritten,omitempty"`
+	Unchanged   bool     `json:"unchanged,omitempty"`
 }
 
 func (p PR) Unread() bool { return p.Activity > p.Seen }
@@ -179,3 +185,10 @@ const (
 )
 
 var AccessModes = []string{AccessFull, AccessReadOnly}
+
+const (
+	ScopeChanges = "changes"
+	ScopeWhole   = "whole PR"
+)
+
+var Scopes = []string{ScopeChanges, ScopeWhole}

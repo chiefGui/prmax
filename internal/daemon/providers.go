@@ -38,18 +38,18 @@ func loadChoice() model.Choice {
 	return c
 }
 
-func saveChoice(provider, mdl, effort, access string) {
+func saveChoice(req model.ReviewRequest) {
 	choiceMu.Lock()
 	defer choiceMu.Unlock()
 	c := loadChoice()
-	c.Provider = provider
-	c.Models[provider] = mdl
-	if effort != "" {
-		c.Efforts[provider] = effort
+	c.Provider = req.Provider
+	c.Models[req.Provider] = req.Model
+	if req.Effort != "" {
+		c.Efforts[req.Provider] = req.Effort
 	}
-	if access != "" {
-		c.Access = access
-	}
+	c.Access = req.Access
+	c.Scope = req.Scope
+	c.Nudge = req.Nudge
 	b, _ := json.MarshalIndent(c, "", "  ")
 	os.WriteFile(choicePath(), b, 0o644)
 }
@@ -69,6 +69,9 @@ func (d *Daemon) providers() model.Providers {
 	}
 	if out.Choice.Access == "" {
 		out.Choice.Access = model.AccessFull
+	}
+	if out.Choice.Scope == "" {
+		out.Choice.Scope = model.ScopeChanges
 	}
 	if out.Choice.Provider == "" {
 		out.Choice.Provider = "claude"

@@ -13,6 +13,9 @@ func renderComment(r model.Review) string {
 	meta := fmt.Sprintf("[Round %d](https://github.com/%s/commit/%s)", r.Round, r.Repo, r.HeadSHA)
 	if r.SinceSHA != "" {
 		meta += fmt.Sprintf(" · since `%s`", short(r.SinceSHA))
+		if r.Scope == model.ScopeWhole {
+			meta += " · whole PR"
+		}
 	}
 	fmt.Fprintf(&b, "<sub>%s · %s</sub>\n", meta, r.ModelLabel)
 	for _, c := range model.Categories {

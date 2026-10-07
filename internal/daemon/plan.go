@@ -25,7 +25,13 @@ func (d *Daemon) plan(ctx context.Context, key string) (model.Plan, error) {
 	}
 	pl := model.Plan{Round: rounds(p) + 1}
 	prev := lastCompleted(p)
-	if prev == nil || p.ReviewedSHA == "" || p.ReviewedSHA == p.HeadSHA {
+	if prev == nil || p.ReviewedSHA == "" {
+		return pl, nil
+	}
+	if p.ReviewedSHA == p.HeadSHA {
+		pl.Unchanged = true
+		pl.SinceRound = prev.Round
+		pl.SinceIssues = len(prev.Findings)
 		return pl, nil
 	}
 	out, err := run(ctx, "", nil, "", d.cfg.GhPath, "api", fmt.Sprintf("repos/%s/compare/%s...%s", p.Repo, p.ReviewedSHA, p.HeadSHA))

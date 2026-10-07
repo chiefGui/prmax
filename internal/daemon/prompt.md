@@ -65,7 +65,13 @@ Last reviewed at {{.Since}}. Changed since:
 {{.ChangedStat}}
 </changed>
 
+{{- if .Whole}}
+
 Review the whole PR; start with what changed.
+{{- else}}
+
+Review only what changed: check it against the rest of the PR for regressions. The rest was already reviewed; don't report on it.
+{{- end}}
 {{- if .Reported}}
 
 Already reported:
@@ -95,6 +101,10 @@ Weigh the discussion: don't re-report a finding that was convincingly rebutted.
 {{.Stat}}
 </stat>
 {{- if .Diff}}
+{{- if and .Since (not .Whole)}}
+
+Diff since {{.Since}}:
+{{- end}}
 
 <diff>
 {{.Diff}}

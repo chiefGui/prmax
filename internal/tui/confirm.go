@@ -27,6 +27,8 @@ type confirmState struct {
 	plan   *model.Plan
 	err    string
 	access string
+	nudge  bool
+	scope  string
 }
 
 type planMsg struct {
@@ -38,6 +40,8 @@ type planMsg struct {
 func (c *confirmState) init(p model.Providers) {
 	c.list = p.List
 	c.access = p.Choice.Access
+	c.nudge = p.Choice.Nudge
+	c.scope = p.Choice.Scope
 	c.pick = map[string]string{}
 	for k, v := range p.Choice.Models {
 		c.pick[k] = v
@@ -109,6 +113,8 @@ func (c *confirmState) request() (model.ReviewRequest, bool) {
 		req.Effort = effs[c.eff]
 	}
 	req.Access = model.AccessModes[c.accessIdx()]
+	req.Nudge = c.nudge
+	req.Scope = model.Scopes[c.scopeIdx()]
 	return req, true
 }
 
@@ -146,16 +152,23 @@ func (c *confirmState) planLines(width int) []string {
 		return []string{sDim.Render("Checking what changed…")}
 	}
 	pl := c.plan
+	issues := fmt.Sprintf("%d issues", pl.SinceIssues)
+	if pl.SinceIssues == 1 {
+		issues = "1 issue"
+	}
+	if pl.Unchanged {
+		head := sDim.Render(fmt.Sprintf("Round %d · nothing changed since round %d (%s)", pl.Round, pl.SinceRound, issues))
+		if c.whole() {
+			return []string{head, "", sText.Render("Reviews the whole PR again.")}
+		}
+		return []string{head, "", sOrange.Render("Nothing to review. Set scope to whole PR to review it again.")}
+	}
 	if pl.Since == "" {
 		note := "full PR"
 		if pl.Rewritten {
 			note = "full PR · history was rewritten since the last review"
 		}
 		return []string{sDim.Render(fmt.Sprintf("Round %d · %s", pl.Round, note))}
-	}
-	issues := fmt.Sprintf("%d issues", pl.SinceIssues)
-	if pl.SinceIssues == 1 {
-		issues = "1 issue"
 	}
 	lines := []string{sDim.Render(fmt.Sprintf("Round %d · since %s (round %d: %s)", pl.Round, short(pl.Since), pl.SinceRound, issues)), ""}
 	const maxShown = 6
@@ -172,7 +185,10 @@ func (c *confirmState) planLines(width int) []string {
 	} else if len(pl.Commits) > 1 {
 		commits = "these " + commits
 	}
-	summary := "Reviews the whole PR, starting with " + commits
+	summary := "Reviews " + commits + " against the rest of the PR"
+	if c.whole() {
+		summary = "Reviews the whole PR, starting with " + commits
+	}
 	if pl.SinceIssues > 0 {
 		summary += fmt.Sprintf(" and re-checks the %s.", issues)
 	} else {
@@ -191,8 +207,14 @@ func (m Model) keyConfirm(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "up", "k", "shift+tab":
 		c.field = max(0, c.field-1)
+		if c.field == 4 && !c.rereview() {
+			c.field = 3
+		}
 	case "down", "j", "tab":
-		c.field = min(3, c.field+1)
+		c.field = min(5, c.field+1)
+		if c.field == 4 && !c.rereview() {
+			c.field = 5
+		}
 	case "left", "h":
 		c.move(-1)
 	case "right", "l":
@@ -221,6 +243,14 @@ func (c *confirmState) move(d int) {
 	if c.field == 0 {
 		c.prov = (c.prov + d + len(c.list)) % len(c.list)
 		c.syncModel()
+		return
+	}
+	if c.field == 5 {
+		c.nudge = !c.nudge
+		return
+	}
+	if c.field == 4 {
+		c.scope = model.Scopes[(c.scopeIdx()+1)%len(model.Scopes)]
 		return
 	}
 	if c.field == 3 {
@@ -275,6 +305,10 @@ func (m Model) viewConfirm() string {
 		b.WriteString(optionRow("Model", mdls, c.mdl, c.field == 1, inner) + "\n")
 		b.WriteString(optionRow("Effort", c.efforts(), c.eff, c.field == 2, inner) + "\n")
 		b.WriteString(optionRow("Access", model.AccessModes, c.accessIdx(), c.field == 3, inner) + "\n")
+		if c.rereview() {
+			b.WriteString(optionRow("Scope", model.Scopes, c.scopeIdx(), c.field == 4, inner) + "\n")
+		}
+		b.WriteString(optionRow("Nudge", nudgeModes, c.nudgeIdx(), c.field == 5, inner) + "\n")
 	}
 	b.WriteString("\n" + keys("enter", "review", "←→", "change", "↑↓", "field", "esc", "cancel"))
 
@@ -353,4 +387,28 @@ func (c *confirmState) accessIdx() int {
 		}
 	}
 	return 0
+}
+
+var nudgeModes = []string{"off", "after posting"}
+
+func (c *confirmState) nudgeIdx() int {
+	if c.nudge {
+		return 1
+	}
+	return 0
+}
+
+func (c *confirmState) scopeIdx() int {
+	for i, s := range model.Scopes {
+		if s == c.scope {
+			return i
+		}
+	}
+	return 0
+}
+
+func (c *confirmState) whole() bool { return model.Scopes[c.scopeIdx()] == model.ScopeWhole }
+
+func (c *confirmState) rereview() bool {
+	return c.plan != nil && (c.plan.Since != "" || c.plan.Unchanged)
 }

@@ -122,8 +122,18 @@ func (d *Daemon) request(key string, req model.ReviewRequest) error {
 	if req.Access != model.AccessFull && req.Access != model.AccessReadOnly {
 		return fmt.Errorf("unknown access %q", req.Access)
 	}
-	if _, ok := d.store.Get(key); !ok {
+	if req.Scope == "" {
+		req.Scope = model.ScopeChanges
+	}
+	if req.Scope != model.ScopeChanges && req.Scope != model.ScopeWhole {
+		return fmt.Errorf("unknown scope %q", req.Scope)
+	}
+	p, ok := d.store.Get(key)
+	if !ok {
 		return fmt.Errorf("unknown pr")
+	}
+	if prev := lastCompleted(p); req.Scope == model.ScopeChanges && prev != nil && p.ReviewedSHA == p.HeadSHA {
+		return fmt.Errorf("nothing changed since round %d", prev.Round)
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -134,7 +144,7 @@ func (d *Daemon) request(key string, req model.ReviewRequest) error {
 		return fmt.Errorf("already queued")
 	}
 	d.pending[key] = req
-	go saveChoice(req.Provider, req.Model, req.Effort, req.Access)
+	go saveChoice(req)
 	d.setStatus(key, model.StatusQueued)
 	d.queue <- key
 	return nil

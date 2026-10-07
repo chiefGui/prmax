@@ -23,6 +23,7 @@ type promptData struct {
 	Title          string
 	Description    string
 	Since          string
+	Whole          bool
 	Range          string
 	Reported       []string
 	Discussion     []string
@@ -58,7 +59,7 @@ func (d *Daemon) prompt(ctx context.Context, j *job, dir, base string) (string, 
 		out, err := run(ctx, dir, nil, "", "git", args...)
 		return strings.TrimRight(out, "\r\n"), err
 	}
-	data := promptData{Title: j.pr.Title, Description: desc, Since: j.review.SinceSHA, Range: "git diff " + diffRange}
+	data := promptData{Title: j.pr.Title, Description: desc, Since: j.review.SinceSHA, Whole: j.review.Scope == model.ScopeWhole, Range: "git diff " + diffRange}
 	if data.Commits, err = git("log", "--no-merges", "--format=%h %s", logRange); err != nil {
 		return "", err
 	}
@@ -73,7 +74,11 @@ func (d *Daemon) prompt(ctx context.Context, j *job, dir, base string) (string, 
 	if data.Stat, err = git("diff", "--stat", diffRange); err != nil {
 		return "", err
 	}
-	diff, err := git("diff", diffRange)
+	shown := diffRange
+	if data.Since != "" && !data.Whole {
+		shown = data.Since + "..HEAD"
+	}
+	diff, err := git("diff", shown)
 	if err != nil {
 		return "", err
 	}

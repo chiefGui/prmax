@@ -150,6 +150,9 @@ func (m Model) roundsBar(p model.PR) string {
 	}
 	if r.SinceSHA != "" {
 		details = append(details, sDim.Render("since "+short(r.SinceSHA)))
+		if r.Scope == model.ScopeWhole {
+			details = append(details, sDim.Render("whole PR"))
+		}
 	}
 	details = append(details, sDim.Render(r.StartedAt.Local().Format("Jan 2 15:04")))
 	if !r.FinishedAt.IsZero() {

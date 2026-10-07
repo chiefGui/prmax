@@ -95,6 +95,7 @@ func (d *Daemon) runReview(ctx context.Context, key string, req model.ReviewRequ
 		Model:      req.Model,
 		Effort:     req.Effort,
 		Access:     req.Access,
+		Scope:      req.Scope,
 		ModelLabel: d.label(req.Provider, req.Model, req.Effort),
 		Round:      rounds(p) + 1,
 		HeadSHA:    p.HeadSHA,
@@ -148,6 +149,9 @@ func (d *Daemon) runReview(ctx context.Context, key string, req model.ReviewRequ
 	})
 	if j.review.Error != "canceled" && j.review.Error != "interrupted" {
 		notify(j.pr, j.review)
+	}
+	if req.Nudge && j.review.Status == model.StatusFindings && j.review.CommentURL != "" {
+		go d.nudge(key)
 	}
 }
 
