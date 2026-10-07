@@ -150,16 +150,3 @@ func (c *Client) Plan(repo string, number int) (model.Plan, error) {
 	}
 	return out, json.NewDecoder(resp.Body).Decode(&out)
 }
-
-func (c *Client) Prompt(id string) (string, error) {
-	resp, err := c.http.Get(c.base + "/api/reviews/" + id + "/prompt")
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return "", fmt.Errorf("no prompt saved for this review")
-	}
-	b, err := io.ReadAll(resp.Body)
-	return string(b), err
-}

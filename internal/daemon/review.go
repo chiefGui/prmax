@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -147,6 +146,9 @@ func (d *Daemon) runReview(ctx context.Context, key string, req model.ReviewRequ
 		cur.Status = model.StatusIdle
 		settle(cur)
 	})
+	if j.review.Error != "canceled" && j.review.Error != "interrupted" {
+		notify(j.pr, j.review)
+	}
 }
 
 func (d *Daemon) execute(ctx context.Context, j *job) error {
@@ -194,9 +196,6 @@ func (d *Daemon) execute(ctx context.Context, j *job) error {
 	prompt, err := d.prompt(ctx, j, wt, baseSHA)
 	if err != nil {
 		return err
-	}
-	if err := os.WriteFile(d.store.PromptPath(j.review.ID), []byte(prompt), 0o644); err != nil {
-		d.logf(j, "error", "save prompt: %v", err)
 	}
 	var res *reviewResult
 	if j.review.Provider == "codex" {

@@ -59,11 +59,6 @@ const (
 	viewDetail
 )
 
-type promptMsg struct {
-	id   string
-	text string
-}
-
 type logsMsg struct {
 	id    string
 	lines []model.LogLine
@@ -92,8 +87,6 @@ type Model struct {
 	reviewIdx int
 	tab       int
 	logs      map[string][]model.LogLine
-	prompts   map[string]string
-	wrapped   map[string]string
 	vp        viewport.Model
 	follow    bool
 
@@ -110,13 +103,11 @@ func New(client *Client) Model {
 	sp.Spinner = spinner.MiniDot
 	sp.Style = sViolet
 	return Model{
-		client:  client,
-		stream:  make(chan streamMsg, 1024),
-		logs:    map[string][]model.LogLine{},
-		prompts: map[string]string{},
-		wrapped: map[string]string{},
-		spin:    sp,
-		follow:  true,
+		client: client,
+		stream: make(chan streamMsg, 1024),
+		logs:   map[string][]model.LogLine{},
+		spin:   sp,
+		follow: true,
 	}
 }
 
@@ -173,11 +164,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, m.wait()
-
-	case promptMsg:
-		m.prompts[msg.id] = msg.text
-		m.refreshDetail()
-		return m, nil
 
 	case logsMsg:
 		live := m.logs[msg.id]
@@ -254,32 +240,28 @@ func (m Model) keyDetail(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch k.String() {
 	case "ctrl+c":
 		return m, tea.Quit
-	case "esc", "q", "h", "left", "backspace":
+	case "esc", "q", "backspace":
 		m.view = viewList
 		return m, nil
 	case "tab":
-		m.tab = (m.tab + 1) % 3
+		m.tab = 1 - m.tab
 		m.follow = true
 		m.refreshDetail()
-		return m, m.loadPrompt()
-	case "[":
-		if m.reviewIdx > 0 {
-			m.reviewIdx--
-			m.fsel = 0
-			m.follow = true
-			m.refreshDetail()
-			return m, tea.Batch(m.loadLog(), m.loadPrompt())
-		}
 		return m, nil
-	case "]":
-		if m.reviewIdx < len(p.Reviews)-1 {
-			m.reviewIdx++
-			m.fsel = 0
-			m.follow = true
-			m.refreshDetail()
-			return m, tea.Batch(m.loadLog(), m.loadPrompt())
+	case "left", "h", "right", "l":
+		i := m.reviewIdx - 1
+		if k.String() == "right" || k.String() == "l" {
+			i = m.reviewIdx + 1
 		}
-		return m, nil
+		if i < 0 || i >= len(p.Reviews) {
+			return m, nil
+		}
+		m.reviewIdx = i
+		m.fsel = 0
+		m.follow = true
+		m.vp.SetYOffset(0)
+		m.refreshDetail()
+		return m, m.loadLog()
 	case "c":
 		if r := m.currentReview(); r != nil && r.CommentURL != "" {
 			return m, openURL(r.CommentURL)
@@ -437,10 +419,8 @@ func (m *Model) refreshDetail() {
 		if at < m.vp.YOffset || at >= m.vp.YOffset+m.vp.Height-6 {
 			m.vp.SetYOffset(max(0, at-2))
 		}
-	case m.tab == 1:
-		content = renderLog(m.logs[r.ID], w)
 	default:
-		content = m.renderPrompt(r.ID, w)
+		content = renderLog(m.logs[r.ID], w)
 	}
 	m.vp.Height = max(1, m.height-m.detailChrome())
 	m.vp.Width = m.width
@@ -450,7 +430,7 @@ func (m *Model) refreshDetail() {
 	}
 }
 
-func (m Model) detailChrome() int { return 10 }
+func (m Model) detailChrome() int { return 11 }
 
 func (m Model) View() string {
 	if m.width == 0 {
@@ -531,12 +511,16 @@ func (m Model) viewDetail() string {
 	b.WriteString(m.header() + "\n")
 	b.WriteString(rule(m.width) + "\n")
 	icon, info := m.statusBits(p)
-	b.WriteString("  " + icon + "  " + sDim.Render(fmt.Sprintf("%s #%d", shortRepo(p.Repo), p.Number)) + "  " + sBold.Render(clip(p.Title, max(10, m.width-30))) + "\n")
-	b.WriteString("     " + sDim.Render(fmt.Sprintf("%s → %s  ·  %s  ·  %s", p.Branch, p.BaseBranch, p.Author, short(p.HeadSHA))) + "  " + info + "\n")
+	title := sDim.Render(fmt.Sprintf("%s #%d", shortRepo(p.Repo), p.Number)) + "  " + sBold.Render(clip(p.Title, max(10, m.width-40)))
+	status := icon + " " + info
+	gap := max(2, m.width-lipgloss.Width(title)-lipgloss.Width(status)-4)
+	b.WriteString("\n  " + title + strings.Repeat(" ", gap) + status + "\n")
+	b.WriteString("  " + sDim.Render(fmt.Sprintf("%s → %s  ·  %s  ·  %s", p.Branch, p.BaseBranch, p.Author, short(p.HeadSHA))) + "\n\n")
 	b.WriteString(m.roundsBar(p) + "\n")
+	b.WriteString("  " + rule(max(0, m.width-4)) + "\n")
 	b.WriteString(m.vp.View() + "\n")
 	b.WriteString(rule(m.width) + "\n")
-	b.WriteString(m.footer(keys("↑↓", "finding", "enter", "open line", "tab", "view", "[ ]", "round", "r", "review", "n", "nudge", "p", "post", "esc", "back")))
+	b.WriteString(m.footer(keys("←→", "round", "↑↓", "finding", "enter", "open", "tab", "log", "r", "review", "n", "nudge", "p", "post", "esc", "back")))
 	return b.String()
 }
 
@@ -673,38 +657,6 @@ func issueCount(n int) string {
 		return "1 issue"
 	}
 	return fmt.Sprintf("%d issues", n)
-}
-
-func (m Model) loadPrompt() tea.Cmd {
-	r := m.currentReview()
-	if m.tab != 2 || r == nil {
-		return nil
-	}
-	if _, ok := m.prompts[r.ID]; ok {
-		return nil
-	}
-	id := r.ID
-	return func() tea.Msg {
-		text, err := m.client.Prompt(id)
-		if err != nil {
-			text = err.Error()
-		}
-		return promptMsg{id: id, text: text}
-	}
-}
-
-func (m Model) renderPrompt(id string, w int) string {
-	text, ok := m.prompts[id]
-	if !ok {
-		return sDim.Render(" Loading…")
-	}
-	key := fmt.Sprintf("%s|%d", id, w)
-	if s, ok := m.wrapped[key]; ok {
-		return s
-	}
-	s := lipgloss.NewStyle().Width(w - 2).Render(text)
-	m.wrapped[key] = s
-	return s
 }
 
 func notPosted(p model.PR) string {
