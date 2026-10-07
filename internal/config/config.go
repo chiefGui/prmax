@@ -29,19 +29,29 @@ func Root() string {
 	if d := os.Getenv("PRMAX_HOME"); d != "" {
 		return d
 	}
-	exe, err := os.Executable()
+	if d := os.Getenv("LOCALAPPDATA"); d != "" {
+		return filepath.Join(d, "prmax")
+	}
+	base, err := os.UserCacheDir()
 	if err != nil {
-		return "."
+		return "prmax"
 	}
-	if r, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = r
-	}
-	return filepath.Dir(filepath.Dir(exe))
+	return filepath.Join(base, "prmax")
 }
 
-func Dir() string { return filepath.Join(Root(), ".prmax") }
+func Dir() string { return Root() }
+
+func BinDir() string { return filepath.Join(Root(), "bin") }
 
 func Path() string { return filepath.Join(Root(), "config.json") }
+
+func LegacyPath() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(filepath.Dir(exe)), "config.json")
+}
 
 func Default() Config {
 	return Config{
@@ -57,6 +67,15 @@ func Load() (Config, error) {
 	c := Default()
 	b, err := os.ReadFile(Path())
 	if errors.Is(err, os.ErrNotExist) {
+		if legacy, lerr := os.ReadFile(LegacyPath()); lerr == nil {
+			if err := os.MkdirAll(Root(), 0o755); err != nil {
+				return c, err
+			}
+			if err := os.WriteFile(Path(), legacy, 0o644); err != nil {
+				return c, err
+			}
+			return Load()
+		}
 		if err := Save(c); err != nil {
 			return c, err
 		}
@@ -75,6 +94,9 @@ func Load() (Config, error) {
 }
 
 func Save(c Config) error {
+	if err := os.MkdirAll(Root(), 0o755); err != nil {
+		return err
+	}
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err

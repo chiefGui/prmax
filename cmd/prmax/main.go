@@ -23,6 +23,20 @@ func main() {
 		fmt.Println(config.Path())
 		return
 	}
+	if cmd == "install" || cmd == "uninstall" {
+		client := tui.NewClient(config.Default().Listen)
+		if cfg, err := config.Load(); err == nil {
+			client = tui.NewClient(cfg.Listen)
+		}
+		run := install
+		if cmd == "uninstall" {
+			run = uninstall
+		}
+		if err := run(client); err != nil {
+			fail(err)
+		}
+		return
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		fail(err)
@@ -51,7 +65,7 @@ func main() {
 			fail(err)
 		}
 	default:
-		fmt.Fprintln(os.Stderr, "usage: prmax [daemon|start|stop|config]")
+		fmt.Fprintln(os.Stderr, "usage: prmax [install|uninstall|start|stop|config|daemon]")
 		os.Exit(2)
 	}
 }
