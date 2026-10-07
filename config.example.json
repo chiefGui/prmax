@@ -1,0 +1,13 @@
+{
+  "listen": "127.0.0.1:47821",
+  "concurrency": 2,
+  "claudePath": "claude",
+  "codexPath": "codex",
+  "ghPath": "gh",
+  "instructions": "",
+  "appId": "",
+  "appKey": "",
+  "repos": [
+    { "name": "owner/repo", "path": "D:/path/to/local/checkout" }
+  ]
+}
