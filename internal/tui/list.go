@@ -14,19 +14,24 @@ const sidebarW = 22
 
 type filterDef struct {
 	name  string
+	glyph string
+	style lipgloss.Style
 	match func(model.PR) bool
 }
 
 var filters = []filterDef{
-	{"All", func(model.PR) bool { return true }},
-	{"To review", func(p model.PR) bool {
-		return p.Status == model.StatusIdle || p.Status == model.StatusOutdated || p.Status == model.StatusFailed
+	{"New", "○", sTitle, func(p model.PR) bool {
+		return p.Status == model.StatusIdle || p.Status == model.StatusFailed && lastDone(p) == nil
 	}},
-	{"Reviewing", func(p model.PR) bool {
+	{"Updated", "↻", sTeal, func(p model.PR) bool {
+		return p.Status == model.StatusOutdated || p.Status == model.StatusFailed && lastDone(p) != nil
+	}},
+	{"Has issues", "△", sOrange, func(p model.PR) bool { return p.Status == model.StatusFindings }},
+	{"Reviewing", "◌", sViolet, func(p model.PR) bool {
 		return p.Status == model.StatusReviewing || p.Status == model.StatusQueued
 	}},
-	{"Has issues", func(p model.PR) bool { return p.Status == model.StatusFindings }},
-	{"Passed", func(p model.PR) bool { return p.Status == model.StatusClean }},
+	{"Passed", "✓", sGreen, func(p model.PR) bool { return p.Status == model.StatusClean }},
+	{"All", "≡", sDim, func(model.PR) bool { return true }},
 }
 
 func (m Model) repos() []string {
@@ -45,22 +50,18 @@ func (m Model) repoFilter() string {
 	return repos[m.repoIdx-1]
 }
 
-func (m Model) count(filter int, extra func(model.PR) bool) int {
+func (m Model) count(filter int) (int, int) {
 	repo := m.repoFilter()
-	n := 0
+	n, unread := 0, 0
 	for _, p := range m.state.PRs {
-		if repo != "" && p.Repo != repo {
-			continue
+		if (repo == "" || p.Repo == repo) && filters[filter].match(p) {
+			n++
+			if p.Unread() {
+				unread++
+			}
 		}
-		if filter >= 0 && !filters[filter].match(p) {
-			continue
-		}
-		if extra != nil && !extra(p) {
-			continue
-		}
-		n++
 	}
-	return n
+	return n, unread
 }
 
 func (m Model) visible() []model.PR {
@@ -82,6 +83,8 @@ func (m Model) cursorPR() (model.PR, bool) {
 	}
 	return v[m.cursor], true
 }
+
+func (m Model) listW() int { return max(20, m.width-sidebarW-1) }
 
 func (m Model) bodyRows() int { return max(3, m.height-4) }
 
@@ -121,14 +124,14 @@ func (m Model) keyList(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "end", "G":
 		m.cursor = max(0, n-1)
 	case "left", "h":
-		return m.setRepo(m.repoIdx - 1), nil
-	case "right", "l":
-		return m.setRepo(m.repoIdx + 1), nil
-	case "tab":
-		return m.setFilter(m.filter + 1), nil
-	case "shift+tab":
 		return m.setFilter(m.filter - 1), nil
-	case "1", "2", "3", "4", "5":
+	case "right", "l":
+		return m.setFilter(m.filter + 1), nil
+	case "tab":
+		return m.setRepo(m.repoIdx + 1), nil
+	case "shift+tab":
+		return m.setRepo(m.repoIdx - 1), nil
+	case "1", "2", "3", "4", "5", "6":
 		return m.setFilter(int(s[0] - '1')), nil
 	case "enter":
 		if p, ok := m.cursorPR(); ok {
@@ -153,14 +156,14 @@ func (m Model) mouseList(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if msg.Action != tea.MouseActionRelease {
 			return m, nil
 		}
-		if msg.X < sidebarW {
+		if msg.X > m.listW() {
 			if i := msg.Y - 3; i >= 0 && i <= len(m.repos()) {
 				return m.setRepo(i), nil
 			}
 			return m, nil
 		}
 		if msg.Y == 2 {
-			x := sidebarW + 3
+			x := 2
 			for i := range filters {
 				w := lipgloss.Width(m.filterTab(i))
 				if msg.X >= x-2 && msg.X < x+w+2 {
@@ -187,14 +190,20 @@ func (m Model) mouseList(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) filterTab(i int) string {
-	n := m.count(i, nil)
-	if i == m.filter {
-		return sTabOn.Render(filters[i].name) + " " + sDim.Render(fmt.Sprint(n))
+	f := filters[i]
+	n, unread := m.count(i)
+	glyph := f.style.Render(f.glyph)
+	badge := ""
+	if unread > 0 {
+		badge = " " + sTitle.Render(fmt.Sprintf("•%d", unread))
 	}
-	return sTab.Render(filters[i].name) + " " + sFaintNum(n)
+	if i == m.filter {
+		return glyph + " " + sTabOn.Render(f.name) + " " + sDim.Render(fmt.Sprint(n)) + badge
+	}
+	return glyph + " " + sTab.Render(f.name) + " " + faintNum(n) + badge
 }
 
-func sFaintNum(n int) string {
+func faintNum(n int) string {
 	if n == 0 {
 		return sFaint.Render("0")
 	}
@@ -213,7 +222,7 @@ func (m Model) sidebar() []string {
 		if down {
 			name += " " + sRed.Render("•")
 		}
-		num := sFaintNum(count)
+		num := faintNum(count)
 		gap := max(1, sidebarW-2-lipgloss.Width(mark)-lipgloss.Width(name)-lipgloss.Width(num))
 		return " " + mark + name + strings.Repeat(" ", gap) + num + " "
 	}
@@ -235,26 +244,25 @@ func (m Model) viewList() string {
 	b.WriteString(m.header() + "\n")
 	b.WriteString(rule(m.width) + "\n")
 
-	rightW := max(20, m.width-sidebarW-1)
+	w := m.listW()
 	var tabs []string
 	for i := range filters {
 		tabs = append(tabs, m.filterTab(i))
 	}
-	right := []string{"  " + strings.Join(tabs, "    "), ""}
+	list := []string{"  " + strings.Join(tabs, "    "), ""}
 	v := m.visible()
 	if len(v) == 0 {
-		right = append(right, "  "+sDim.Render("Nothing here."))
+		list = append(list, "  "+sDim.Render("Nothing here."))
 	} else {
-		showRepo := m.repoFilter() == ""
 		repoW := 0
-		if showRepo {
+		if m.repoFilter() == "" {
 			for _, p := range v {
 				repoW = max(repoW, len(shortRepo(p.Repo)))
 			}
 		}
 		start := m.listStart()
 		for i := start; i < len(v) && i-start < m.listRows(); i++ {
-			right = append(right, m.row(v[i], repoW, rightW, i == m.cursor))
+			list = append(list, m.row(v[i], repoW, w, i == m.cursor))
 		}
 	}
 
@@ -262,18 +270,18 @@ func (m Model) viewList() string {
 	bar := sFaint.Render("│")
 	for i := 0; i < m.bodyRows(); i++ {
 		l := ""
-		if i < len(side) {
-			l = side[i]
+		if i < len(list) {
+			l = list[i]
 		}
-		l += strings.Repeat(" ", max(0, sidebarW-lipgloss.Width(l)))
+		l += strings.Repeat(" ", max(0, w-lipgloss.Width(l)))
 		r := ""
-		if i < len(right) {
-			r = right[i]
+		if i < len(side) {
+			r = side[i]
 		}
 		b.WriteString(l + bar + r + "\n")
 	}
 	b.WriteString(rule(m.width) + "\n")
-	b.WriteString(m.footer(keys("enter", "open", "r", "review", "tab", "filter", "←→", "repo", "o", "browser", "q", "quit")))
+	b.WriteString(m.footer(keys("enter", "open", "r", "review", "←→", "filter", "tab", "repo", "o", "browser", "q", "quit")))
 	return b.String()
 }
 
@@ -286,8 +294,8 @@ func (m Model) row(p model.PR, repoW, width int, sel bool) string {
 	}
 	num := sDim.Render(fmt.Sprintf("#%-4d", p.Number))
 	age := sFaint.Render(fmt.Sprintf("%4s", ago(p.UpdatedAt)))
-	infoW := 14
-	fixed := 2 + 1 + 3 + repoW + 5 + 3 + 3 + infoW + 2 + 4 + 2
+	infoW := 20
+	fixed := 3 + 1 + 3 + repoW + 5 + 3 + 3 + infoW + 2 + 4 + 2
 	titleW := max(10, width-fixed)
 	titleStyle := sText
 	if sel {
@@ -295,7 +303,11 @@ func (m Model) row(p model.PR, repoW, width int, sel bool) string {
 	}
 	title := titleStyle.Render(fmt.Sprintf("%-*s", titleW, clip(p.Title, titleW)))
 	info += strings.Repeat(" ", max(0, infoW-lipgloss.Width(info)))
-	line := fmt.Sprintf("  %s   %s%s   %s   %s  %s  ", icon, repo, num, title, info, age)
+	dot := " "
+	if p.Unread() {
+		dot = sTitle.Render("•")
+	}
+	line := fmt.Sprintf(" %s %s   %s%s   %s   %s  %s  ", dot, icon, repo, num, title, info, age)
 	if sel {
 		return sSelected.Render(line + strings.Repeat(" ", max(0, width-lipgloss.Width(line))))
 	}

@@ -50,6 +50,19 @@ func (d *Daemon) routes(shutdown context.CancelFunc) http.Handler {
 		writeJSON(w, d.store.ReadLog(r.PathValue("id")))
 	})
 	mux.HandleFunc("POST /api/prs/{owner}/{name}/{n}/{action}", d.handleAction)
+	mux.HandleFunc("GET /api/prs/{owner}/{name}/{n}/plan", func(w http.ResponseWriter, r *http.Request) {
+		n, err := strconv.Atoi(r.PathValue("n"))
+		if err != nil {
+			http.Error(w, "bad number", http.StatusBadRequest)
+			return
+		}
+		pl, err := d.plan(r.Context(), model.Key(r.PathValue("owner")+"/"+r.PathValue("name"), n))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, pl)
+	})
 	mux.HandleFunc("POST /api/shutdown", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		go func() {
@@ -93,7 +106,7 @@ func (d *Daemon) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	d.store.Update(func(m map[string]*model.PR) {
 		p, ok := m[key]
 		if !ok {
-			p = &model.PR{Repo: repo, Number: pr.Number, Status: model.StatusIdle}
+			p = &model.PR{Repo: repo, Number: pr.Number, Status: model.StatusIdle, Activity: 1}
 			m[key] = p
 		}
 		p.Title = pr.Title
@@ -103,7 +116,7 @@ func (d *Daemon) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		p.Author = pr.User.Login
 		p.Branch = pr.Head.Ref
 		p.BaseBranch = pr.Base.Ref
-		p.HeadSHA = pr.Head.SHA
+		setHead(p, pr.Head.SHA)
 		if pr.UpdatedAt.After(p.UpdatedAt) {
 			p.UpdatedAt = pr.UpdatedAt
 		}
@@ -163,6 +176,12 @@ func (d *Daemon) handleAction(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
+	case "seen":
+		d.store.Update(func(m map[string]*model.PR) {
+			if p, ok := m[key]; ok {
+				p.Seen = p.Activity
+			}
+		})
 	case "cancel":
 		d.cancel(key)
 	case "refresh":

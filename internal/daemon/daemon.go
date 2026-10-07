@@ -195,7 +195,7 @@ func (d *Daemon) catchUp(ctx context.Context, repo string) {
 			key := model.Key(repo, g.Number)
 			p, ok := m[key]
 			if !ok {
-				p = &model.PR{Status: model.StatusIdle}
+				p = &model.PR{Status: model.StatusIdle, Activity: 1}
 				m[key] = p
 			}
 			g.apply(p, repo)

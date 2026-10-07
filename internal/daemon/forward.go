@@ -14,6 +14,7 @@ import (
 )
 
 func (d *Daemon) forward(ctx context.Context, repo string) {
+	d.deleteStaleHooks(ctx, repo)
 	backoff := 2 * time.Second
 	for ctx.Err() == nil {
 		started := time.Now()
@@ -58,28 +59,36 @@ func (d *Daemon) forwardOnce(ctx context.Context, repo string) error {
 		pw.Close()
 		done <- err
 	}()
+	exited := make(chan struct{})
+	defer close(exited)
 	go func() {
-		<-ctx.Done()
-		tree.Kill()
+		select {
+		case <-ctx.Done():
+			tree.Kill()
+		case <-exited:
+		}
 	}()
-	var last string
+	var errs []string
 	connected := false
 	sc := bufio.NewScanner(pr)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		last = line
-		if !connected && strings.Contains(strings.ToLower(line), "forwarding") {
+		switch {
+		case line == "":
+		case !connected && strings.Contains(strings.ToLower(line), "forwarding"):
 			connected = true
 			d.store.SetForwarder(model.Forwarder{Repo: repo, Connected: true})
 			go d.catchUp(ctx, repo)
+		case strings.HasPrefix(line, "Usage:"):
+			for sc.Scan() {
+			}
+		default:
+			errs = append(errs, line)
 		}
 	}
 	err = <-done
-	if last != "" {
-		return &forwardErr{msg: last}
+	if len(errs) > 0 {
+		return &forwardErr{msg: strings.Join(errs, " ")}
 	}
 	return err
 }

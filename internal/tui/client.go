@@ -136,3 +136,17 @@ func (c *Client) Review(repo string, number int, req model.ReviewRequest) error 
 	}
 	return nil
 }
+
+func (c *Client) Plan(repo string, number int) (model.Plan, error) {
+	var out model.Plan
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Get(fmt.Sprintf("%s/api/prs/%s/%d/plan", c.base, repo, number))
+	if err != nil {
+		return out, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return out, fmt.Errorf("%s", strings.TrimSpace(string(msg)))
+	}
+	return out, json.NewDecoder(resp.Body).Decode(&out)
+}

@@ -23,6 +23,8 @@ var (
 	cGreen  = lipgloss.AdaptiveColor{Light: "#3D8A5A", Dark: "#8CC79F"}
 	cAmber  = lipgloss.AdaptiveColor{Light: "#A8742A", Dark: "#D9B877"}
 	cRed    = lipgloss.AdaptiveColor{Light: "#BF4F48", Dark: "#E3958D"}
+	cViolet = lipgloss.AdaptiveColor{Light: "#8456C4", Dark: "#C4A7F0"}
+	cTeal   = lipgloss.AdaptiveColor{Light: "#2E8A8A", Dark: "#86CFCB"}
 	cSelBg  = lipgloss.AdaptiveColor{Light: "#EEEFF6", Dark: "#24252C"}
 
 	sTitle    = lipgloss.NewStyle().Foreground(cAccent)
@@ -33,6 +35,8 @@ var (
 	sGreen    = lipgloss.NewStyle().Foreground(cGreen)
 	sOrange   = lipgloss.NewStyle().Foreground(cAmber)
 	sRed      = lipgloss.NewStyle().Foreground(cRed)
+	sViolet   = lipgloss.NewStyle().Foreground(cViolet)
+	sTeal     = lipgloss.NewStyle().Foreground(cTeal)
 	sSelected = lipgloss.NewStyle().Background(cSelBg)
 	sTab      = lipgloss.NewStyle().Foreground(cMuted)
 	sTabOn    = lipgloss.NewStyle().Foreground(cText).Bold(true).Underline(true)
@@ -96,7 +100,7 @@ type Model struct {
 func New(client *Client) Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.MiniDot
-	sp.Style = lipgloss.NewStyle().Foreground(cAccent)
+	sp.Style = sViolet
 	return Model{
 		client: client,
 		stream: make(chan streamMsg, 1024),
@@ -139,12 +143,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.state = *msg.state
 			sortPRs(m.state.PRs)
 			m.cursor = min(m.cursor, max(0, len(m.visible())-1))
+			var seen tea.Cmd
 			if m.view == viewDetail {
-				if _, ok := m.selected(); !ok {
+				if p, ok := m.selected(); !ok {
 					m.view = viewList
+				} else if p.Unread() {
+					seen = m.markSeen(p)
 				}
 			}
 			m.refreshDetail()
+			return m, tea.Batch(m.wait(), seen)
 		case msg.log != nil:
 			id := msg.log.ReviewID
 			if _, ok := m.logs[id]; ok {
@@ -164,6 +172,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case openConfirmMsg:
 		return m.openConfirm(msg.pr)
+
+	case planMsg:
+		if m.confirm != nil && m.confirm.pr.Key() == msg.key {
+			if msg.err != nil {
+				m.confirm.err = msg.err.Error()
+			} else {
+				m.confirm.plan = &msg.plan
+			}
+		}
+		return m, nil
 
 	case providersMsg:
 		m.providers = &msg.p
@@ -294,7 +312,17 @@ func (m Model) openDetail(p model.PR) (tea.Model, tea.Cmd) {
 	m.follow = true
 	m.vp = viewport.New(m.width, max(1, m.height-m.detailChrome()))
 	m.refreshDetail()
+	if p.Unread() {
+		return m, tea.Batch(m.loadLog(), m.markSeen(p))
+	}
 	return m, m.loadLog()
+}
+
+func (m Model) markSeen(p model.PR) tea.Cmd {
+	return func() tea.Msg {
+		m.client.Action(p.Repo, p.Number, "seen")
+		return nil
+	}
 }
 
 func (m Model) loadLog() tea.Cmd {
@@ -426,35 +454,30 @@ func (m Model) statusBits(p model.PR) (string, string) {
 		if r != nil && r.Kind == model.KindIncremental {
 			label = "re-reviewing"
 		}
-		return m.spin.View(), sTitle.Render(label)
+		return m.spin.View(), sViolet.Render(label)
 	case model.StatusQueued:
-		return sTitle.Render("◌"), sTitle.Render("queued")
+		return sViolet.Render("◌"), sViolet.Render("queued")
 	case model.StatusClean:
 		return sGreen.Render("✓"), sGreen.Render("passed")
 	case model.StatusFindings:
 		n := 0
 		if r := lastDone(p); r != nil {
 			n = len(r.Findings)
-			for _, pv := range r.Previous {
-				if pv.Status == "open" {
-					n++
-				}
-			}
 		}
-		label := fmt.Sprintf("%d issues", n)
-		if n == 1 {
-			label = "1 issue"
-		}
-		return sOrange.Render("●"), sOrange.Render(label)
+		return sOrange.Render("△"), sOrange.Render(issueCount(n))
 	case model.StatusFailed:
 		return sRed.Render("✕"), sRed.Render("failed")
 	case model.StatusOutdated:
-		return sDim.Render("○"), sText.Render("new commits")
+		label := "updated"
+		if r := lastDone(p); r != nil && len(r.Findings) > 0 {
+			label = "updated · " + issueCount(len(r.Findings))
+		}
+		return sTeal.Render("↻"), sTeal.Render(label)
 	}
 	if p.Draft {
-		return sDim.Render("○"), sDim.Render("draft")
+		return sTitle.Render("○"), sDim.Render("draft")
 	}
-	return sDim.Render("○"), sDim.Render("not reviewed")
+	return sTitle.Render("○"), sDim.Render("not reviewed")
 }
 
 func (m Model) viewDetail() string {
@@ -483,11 +506,13 @@ func (m Model) roundsBar(p model.PR) string {
 	}
 	line := "\n  " + strings.Join(t, "   ")
 	if r := m.currentReview(); r != nil {
-		kind := "full review"
-		if r.Kind == model.KindIncremental {
-			kind = "re-review since " + short(r.SinceSHA)
+		parts := []string{fmt.Sprintf("%d/%d", m.reviewIdx+1, len(p.Reviews))}
+		if r.Round > 0 {
+			parts = append(parts, fmt.Sprintf("round %d", r.Round))
 		}
-		parts := []string{fmt.Sprintf("round %d of %d", m.reviewIdx+1, len(p.Reviews)), kind}
+		if r.SinceSHA != "" {
+			parts = append(parts, "since "+short(r.SinceSHA))
+		}
 		if r.ModelLabel != "" {
 			parts = append(parts, r.ModelLabel)
 		}
@@ -505,54 +530,39 @@ func (m Model) roundsBar(p model.PR) string {
 
 func renderFindings(r model.Review, w int) string {
 	var b strings.Builder
-	wrap := lipgloss.NewStyle().Width(w - 4)
 	if r.Status == model.StatusReviewing {
-		b.WriteString(" " + sTitle.Render("Review in progress — press tab for the live log.") + "\n")
+		b.WriteString(" " + sTitle.Render("Review in progress. Press tab for the live log.") + "\n")
 		return b.String()
 	}
 	if r.Error != "" {
-		b.WriteString(" " + sRed.Render(wrap.Render(r.Error)) + "\n\n")
+		b.WriteString(" " + sRed.Render(lipgloss.NewStyle().Width(w-4).Render(r.Error)) + "\n\n")
 	}
-	if r.Summary != "" {
-		b.WriteString(indent(sText.Render(wrap.Render(r.Summary)), "  ") + "\n\n")
+	if r.Status != model.StatusClean && r.Status != model.StatusFindings {
+		return b.String()
 	}
-	if len(r.Previous) > 0 {
-		b.WriteString(" " + sBold.Render("Previous findings") + "\n")
-		for _, pv := range r.Previous {
-			var mark string
-			switch pv.Status {
-			case "fixed":
-				mark = sGreen.Render("✓ fixed   ")
-			case "open":
-				mark = sOrange.Render("● open    ")
-			default:
-				mark = sDim.Render("– obsolete")
+	if len(r.Findings) == 0 {
+		b.WriteString(" " + sGreen.Render("No findings.") + "\n\n")
+	}
+	text := lipgloss.NewStyle().Width(w - 6)
+	for _, c := range model.Categories {
+		fs := r.ByCategory(c.ID)
+		if len(fs) == 0 {
+			continue
+		}
+		b.WriteString(" " + sBold.Render(c.Label) + "\n")
+		for _, f := range fs {
+			loc := f.File
+			if f.Line > 0 {
+				loc = fmt.Sprintf("%s:%d", f.File, f.Line)
 			}
-			b.WriteString("  " + mark + " " + sText.Render(pv.Title) + "\n")
-			if pv.Note != "" {
-				b.WriteString(indent(sDim.Render(lipgloss.NewStyle().Width(w-16).Render(pv.Note)), "             ") + "\n")
+			head := "   " + sBold.Render(strings.TrimSpace(f.Title)) + "  " + sTitle.Render(loc)
+			if f.StillOpen {
+				head += "  " + sOrange.Render("still open")
 			}
+			b.WriteString(head + "\n")
+			b.WriteString(indent(sText.Render(text.Render(strings.TrimSpace(f.Text))), "   ") + "\n")
 		}
 		b.WriteString("\n")
-	}
-	if len(r.Findings) == 0 && (r.Status == model.StatusClean || r.Status == model.StatusFindings) {
-		b.WriteString(" " + sGreen.Render("✓ No new issues found.") + "\n")
-	}
-	for i, f := range r.Findings {
-		sev := sDim
-		switch f.Severity {
-		case "high":
-			sev = sRed
-		case "medium":
-			sev = sOrange
-		}
-		loc := f.File
-		if f.Line > 0 {
-			loc = fmt.Sprintf("%s:%d", f.File, f.Line)
-		}
-		b.WriteString(fmt.Sprintf(" %s %s %s\n", sBold.Render(fmt.Sprintf("%d.", i+1)), sev.Render("["+f.Severity+"]"), sBold.Render(f.Title)))
-		b.WriteString("    " + sTitle.Render(loc) + "\n")
-		b.WriteString(indent(sText.Render(lipgloss.NewStyle().Width(w-6).Render(f.Detail)), "    ") + "\n\n")
 	}
 	if r.CommentURL != "" {
 		b.WriteString(" " + sDim.Render("posted: "+r.CommentURL) + "\n")
@@ -686,4 +696,11 @@ func ago(t time.Time) string {
 		return fmt.Sprintf("%dh", int(d.Hours()))
 	}
 	return fmt.Sprintf("%dd", int(d.Hours()/24))
+}
+
+func issueCount(n int) string {
+	if n == 1 {
+		return "1 issue"
+	}
+	return fmt.Sprintf("%d issues", n)
 }

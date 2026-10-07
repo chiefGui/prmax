@@ -63,7 +63,7 @@ func (g ghPR) apply(p *model.PR, repo string) {
 	p.URL = g.URL
 	p.Branch = g.HeadRefName
 	p.BaseBranch = g.BaseRefName
-	p.HeadSHA = g.HeadRefOid
+	setHead(p, g.HeadRefOid)
 	p.Draft = g.IsDraft
 	p.Author = g.Author.Login
 	if g.UpdatedAt.After(p.UpdatedAt) {
@@ -96,4 +96,11 @@ func (d *Daemon) postComment(ctx context.Context, repo string, number int, body 
 	}
 	out, err := run(ctx, "", env, body, d.cfg.GhPath, "pr", "comment", fmt.Sprint(number), "-R", repo, "--body-file", "-")
 	return strings.TrimSpace(out), err
+}
+
+func setHead(p *model.PR, sha string) {
+	if p.HeadSHA != "" && p.HeadSHA != sha {
+		p.Activity++
+	}
+	p.HeadSHA = sha
 }

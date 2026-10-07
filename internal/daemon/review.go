@@ -3,6 +3,7 @@ package daemon
 import (
 	"bufio"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,40 +21,29 @@ import (
 const reviewSchema = `{
   "type": "object",
   "additionalProperties": false,
-  "required": ["verdict", "summary", "findings", "previous"],
+  "required": ["findings"],
   "properties": {
-    "verdict": {"type": "string", "enum": ["clean", "findings"]},
-    "summary": {"type": "string"},
     "findings": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["severity", "file", "line", "title", "detail"],
+        "required": ["category", "file", "line", "title", "text", "stillOpen"],
         "properties": {
-          "severity": {"type": "string", "enum": ["high", "medium", "low"]},
+          "category": {"type": "string", "enum": ["bugs", "cleanup", "performance", "architecture", "tests", "docs"]},
           "file": {"type": "string"},
           "line": {"type": "integer"},
           "title": {"type": "string"},
-          "detail": {"type": "string"}
-        }
-      }
-    },
-    "previous": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["title", "status", "note"],
-        "properties": {
-          "title": {"type": "string"},
-          "status": {"type": "string", "enum": ["fixed", "open", "obsolete"]},
-          "note": {"type": "string"}
+          "text": {"type": "string"},
+          "stillOpen": {"type": "boolean"}
         }
       }
     }
   }
 }`
+
+//go:embed prompt.md
+var defaultPrompt string
 
 var allowedTools = []string{
 	"Read", "Grep", "Glob",
@@ -63,24 +53,31 @@ var allowedTools = []string{
 }
 
 type reviewResult struct {
-	Verdict  string           `json:"verdict"`
-	Summary  string           `json:"summary"`
-	Findings []model.Finding  `json:"findings"`
-	Previous []model.Previous `json:"previous"`
+	Findings []model.Finding `json:"findings"`
 }
 
 type job struct {
-	key       string
-	pr        model.PR
-	repo      config.Repo
-	review    model.Review
-	openItems []string
+	key      string
+	pr       model.PR
+	repo     config.Repo
+	review   model.Review
+	reported []model.Finding
 }
 
 func (d *Daemon) runReview(ctx context.Context, key string, req model.ReviewRequest) {
 	p, ok := d.store.Get(key)
 	if !ok {
 		return
+	}
+	if g, err := d.viewPR(ctx, p.Repo, p.Number); err == nil {
+		d.store.Update(func(prs map[string]*model.PR) {
+			if cur, ok := prs[key]; ok {
+				g.apply(cur, p.Repo)
+			}
+		})
+		p, _ = d.store.Get(key)
+	} else {
+		log.Printf("refresh %s: %v", key, err)
 	}
 	repo, ok := d.cfg.Repo(p.Repo)
 	if !ok {
@@ -96,6 +93,7 @@ func (d *Daemon) runReview(ctx context.Context, key string, req model.ReviewRequ
 		Model:      req.Model,
 		Effort:     req.Effort,
 		ModelLabel: d.label(req.Provider, req.Model, req.Effort),
+		Round:      rounds(p) + 1,
 		HeadSHA:    p.HeadSHA,
 		Status:     model.StatusReviewing,
 		StartedAt:  time.Now(),
@@ -139,6 +137,9 @@ func (d *Daemon) runReview(ctx context.Context, key string, req model.ReviewRequ
 		if j.review.Status == model.StatusClean || j.review.Status == model.StatusFindings {
 			cur.ReviewedSHA = j.review.HeadSHA
 		}
+		if j.review.Error != "canceled" && j.review.Error != "interrupted" {
+			cur.Activity++
+		}
 		cur.Status = model.StatusIdle
 		settle(cur)
 	})
@@ -178,14 +179,17 @@ func (d *Daemon) execute(ctx context.Context, j *job) error {
 		if _, err := run(ctx, wt, nil, "", "git", "merge-base", "--is-ancestor", p.ReviewedSHA, "HEAD"); err == nil {
 			j.review.Kind = model.KindIncremental
 			j.review.SinceSHA = p.ReviewedSHA
-			j.openItems = openItems(prev)
+			j.reported = prev.Findings
 		} else {
 			d.logf(j, "info", "previous review commit %s is gone (force push?), doing a full review", short(p.ReviewedSHA))
 		}
 	}
 	d.syncReview(j)
 
-	prompt := d.prompt(j, baseSHA)
+	prompt, err := d.prompt(ctx, j, wt, baseSHA)
+	if err != nil {
+		return err
+	}
 	var res *reviewResult
 	if j.review.Provider == "codex" {
 		res, err = d.codex(ctx, j, wt, prompt)
@@ -195,10 +199,13 @@ func (d *Daemon) execute(ctx context.Context, j *job) error {
 	if err != nil {
 		return err
 	}
-	j.review.Summary = res.Summary
+	if len(j.reported) == 0 {
+		for i := range res.Findings {
+			res.Findings[i].StillOpen = false
+		}
+	}
 	j.review.Findings = res.Findings
-	j.review.Previous = res.Previous
-	if len(res.Findings) == 0 && !anyOpen(res.Previous) {
+	if len(res.Findings) == 0 {
 		j.review.Status = model.StatusClean
 	} else {
 		j.review.Status = model.StatusFindings
@@ -225,44 +232,6 @@ func (d *Daemon) syncReview(j *job) {
 			}
 		}
 	})
-}
-
-func (d *Daemon) prompt(j *job, baseSHA string) string {
-	p := j.pr
-	var b strings.Builder
-	fmt.Fprintf(&b, "You are reviewing pull request #%d in %s.\n\n", p.Number, p.Repo)
-	fmt.Fprintf(&b, "Title: %s\nAuthor: %s\nBranch: %s -> %s\n", p.Title, p.Author, p.Branch, p.BaseBranch)
-	if body := strings.TrimSpace(p.Body); body != "" {
-		if len(body) > 4000 {
-			body = body[:4000] + "\n[truncated]"
-		}
-		fmt.Fprintf(&b, "\nDescription:\n%s\n", body)
-	}
-	fmt.Fprintf(&b, "\nThe PR head (%s) is checked out in the current directory as a detached worktree. Large binary files may be Git LFS pointers; ignore them.\n", p.HeadSHA)
-	if j.review.Kind == model.KindIncremental {
-		fmt.Fprintf(&b, "\nThis is a re-review. The PR was last reviewed at %s. Focus on what changed since then: `git log %s..HEAD` and `git diff %s..HEAD`. Use `git diff %s...HEAD` only when you need the wider context of the whole PR.\n", j.review.SinceSHA, j.review.SinceSHA, j.review.SinceSHA, baseSHA)
-		if len(j.openItems) > 0 {
-			b.WriteString("\nFindings still open from the previous review. For each one, report in `previous` whether it is now fixed, still open, or obsolete:\n")
-			for _, it := range j.openItems {
-				fmt.Fprintf(&b, "- %s\n", it)
-			}
-		}
-		b.WriteString("\nReport only new problems in `findings`; do not repeat previous findings there.\n")
-	} else {
-		fmt.Fprintf(&b, "\nThe PR's changes are `git diff %s...HEAD` (merge base %s). Use `git log %s..HEAD` for the commits.\n", baseSHA, baseSHA, baseSHA)
-		b.WriteString("Leave `previous` empty.\n")
-	}
-	b.WriteString(`
-Review for correctness bugs, regressions, crashes, data loss, security problems, race conditions and broken edge cases. Read the surrounding code to confirm each issue is real. Ignore style, naming, formatting and matters of taste. Only report problems you are confident about; an empty findings list is a good outcome when the code is correct.
-
-If the repository has AGENTS.md or CLAUDE.md, follow its conventions when judging the change.
-
-Do not modify any files. For each finding give the file path relative to the repo root, the most relevant line in the PR head, a short title, and a detail that explains the failure scenario concretely. The summary is one or two sentences about the PR and the overall result.
-`)
-	if s := strings.TrimSpace(d.cfg.Instructions); s != "" {
-		fmt.Fprintf(&b, "\nAdditional instructions:\n%s\n", s)
-	}
-	return b.String()
 }
 
 func (d *Daemon) claude(ctx context.Context, j *job, dir, prompt string) (*reviewResult, error) {
@@ -459,32 +428,6 @@ func lastCompleted(p model.PR) *model.Review {
 		}
 	}
 	return nil
-}
-
-func openItems(r *model.Review) []string {
-	var out []string
-	for _, pv := range r.Previous {
-		if pv.Status == "open" {
-			out = append(out, pv.Title)
-		}
-	}
-	for _, f := range r.Findings {
-		loc := f.File
-		if f.Line > 0 {
-			loc = fmt.Sprintf("%s:%d", f.File, f.Line)
-		}
-		out = append(out, fmt.Sprintf("[%s] %s (%s): %s", f.Severity, f.Title, loc, truncate(f.Detail, 400)))
-	}
-	return out
-}
-
-func anyOpen(prev []model.Previous) bool {
-	for _, p := range prev {
-		if p.Status == "open" {
-			return true
-		}
-	}
-	return false
 }
 
 func reviewID(p model.PR) string {

@@ -32,6 +32,8 @@ type PR struct {
 	HeadSHA     string    `json:"headSha"`
 	Draft       bool      `json:"draft"`
 	ReviewedSHA string    `json:"reviewedSha"`
+	Activity    int       `json:"activity"`
+	Seen        int       `json:"seen"`
 	Status      string    `json:"status"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 	Reviews     []Review  `json:"reviews"`
@@ -47,39 +49,52 @@ func (p PR) LastReview() *Review {
 }
 
 type Review struct {
-	ID         string     `json:"id"`
-	Repo       string     `json:"repo"`
-	Number     int        `json:"number"`
-	Kind       string     `json:"kind"`
-	Provider   string     `json:"provider"`
-	Model      string     `json:"model"`
-	Effort     string     `json:"effort"`
-	ModelLabel string     `json:"modelLabel"`
-	HeadSHA    string     `json:"headSha"`
-	SinceSHA   string     `json:"sinceSha,omitempty"`
-	Status     string     `json:"status"`
-	StartedAt  time.Time  `json:"startedAt"`
-	FinishedAt time.Time  `json:"finishedAt,omitzero"`
-	CostUSD    float64    `json:"costUsd"`
-	Summary    string     `json:"summary"`
-	Findings   []Finding  `json:"findings"`
-	Previous   []Previous `json:"previous"`
-	Error      string     `json:"error,omitempty"`
-	CommentURL string     `json:"commentUrl,omitempty"`
+	ID         string    `json:"id"`
+	Repo       string    `json:"repo"`
+	Number     int       `json:"number"`
+	Kind       string    `json:"kind"`
+	Provider   string    `json:"provider"`
+	Model      string    `json:"model"`
+	Effort     string    `json:"effort"`
+	ModelLabel string    `json:"modelLabel"`
+	Round      int       `json:"round"`
+	HeadSHA    string    `json:"headSha"`
+	SinceSHA   string    `json:"sinceSha,omitempty"`
+	Status     string    `json:"status"`
+	StartedAt  time.Time `json:"startedAt"`
+	FinishedAt time.Time `json:"finishedAt,omitzero"`
+	CostUSD    float64   `json:"costUsd"`
+	Findings   []Finding `json:"findings"`
+	Error      string    `json:"error,omitempty"`
+	CommentURL string    `json:"commentUrl,omitempty"`
 }
 
 type Finding struct {
-	Severity string `json:"severity"`
-	File     string `json:"file"`
-	Line     int    `json:"line"`
-	Title    string `json:"title"`
-	Detail   string `json:"detail"`
+	Category  string `json:"category"`
+	File      string `json:"file"`
+	Line      int    `json:"line"`
+	Title     string `json:"title"`
+	Text      string `json:"text"`
+	StillOpen bool   `json:"stillOpen"`
 }
 
-type Previous struct {
-	Title  string `json:"title"`
-	Status string `json:"status"`
-	Note   string `json:"note"`
+var Categories = []struct{ ID, Label string }{
+	{"bugs", "Bugs"},
+	{"cleanup", "Cleanup"},
+	{"performance", "Performance"},
+	{"architecture", "Architecture"},
+	{"tests", "Tests"},
+	{"docs", "Docs"},
+}
+
+func (r Review) ByCategory(id string) []Finding {
+	var out []Finding
+	for _, f := range r.Findings {
+		if f.Category == id {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 type Forwarder struct {
@@ -136,3 +151,19 @@ type ReviewRequest struct {
 	Model    string `json:"model"`
 	Effort   string `json:"effort"`
 }
+
+type Commit struct {
+	SHA   string `json:"sha"`
+	Title string `json:"title"`
+}
+
+type Plan struct {
+	Round       int      `json:"round"`
+	Since       string   `json:"since,omitempty"`
+	SinceRound  int      `json:"sinceRound,omitempty"`
+	SinceIssues int      `json:"sinceIssues,omitempty"`
+	Commits     []Commit `json:"commits,omitempty"`
+	Rewritten   bool     `json:"rewritten,omitempty"`
+}
+
+func (p PR) Unread() bool { return p.Activity > p.Seen }

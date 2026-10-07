@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"path"
 	"strings"
 
 	"prmax/internal/model"
@@ -9,52 +10,42 @@ import (
 
 func renderComment(r model.Review) string {
 	var b strings.Builder
-	if r.Kind == model.KindIncremental {
-		fmt.Fprintf(&b, "### prmax re-review · `%s` (since `%s`) · %s\n\n", short(r.HeadSHA), short(r.SinceSHA), r.ModelLabel)
-	} else {
-		fmt.Fprintf(&b, "### prmax review · `%s` · %s\n\n", short(r.HeadSHA), r.ModelLabel)
+	meta := fmt.Sprintf("Round %d · [`%s`](https://github.com/%s/commit/%s)", r.Round, short(r.HeadSHA), r.Repo, r.HeadSHA)
+	if r.SinceSHA != "" {
+		meta += fmt.Sprintf(" · since `%s`", short(r.SinceSHA))
 	}
-	if s := strings.TrimSpace(r.Summary); s != "" {
-		b.WriteString(s + "\n\n")
-	}
-	if len(r.Previous) > 0 {
-		b.WriteString("**Previous findings**\n\n")
-		for _, p := range r.Previous {
-			icon := map[string]string{"fixed": "✅", "open": "⚠️", "obsolete": "➖"}[p.Status]
-			fmt.Fprintf(&b, "- %s **%s** — %s", icon, p.Status, p.Title)
-			if n := strings.TrimSpace(p.Note); n != "" {
-				fmt.Fprintf(&b, ": %s", n)
+	fmt.Fprintf(&b, "<sub>%s · %s</sub>\n", meta, r.ModelLabel)
+	for _, c := range model.Categories {
+		fs := r.ByCategory(c.ID)
+		if len(fs) == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "\n**%s**\n\n", c.Label)
+		for i, f := range fs {
+			title := strings.TrimSpace(f.Title)
+			if f.StillOpen {
+				title += " · *still open*"
+			}
+			fmt.Fprintf(&b, "%d. **%s** · %s\n", i+1, title, fileLink(r, f))
+			for _, line := range strings.Split(strings.TrimSpace(f.Text), "\n") {
+				fmt.Fprintf(&b, "   %s\n", line)
 			}
 			b.WriteString("\n")
 		}
-		b.WriteString("\n")
 	}
 	if len(r.Findings) == 0 {
-		if r.Kind == model.KindIncremental {
-			b.WriteString("✅ No new issues found.\n")
-		} else {
-			b.WriteString("✅ No issues found.\n")
-		}
-	} else {
-		if r.Kind == model.KindIncremental {
-			b.WriteString("**New findings**\n\n")
-		} else {
-			b.WriteString("**Findings**\n\n")
-		}
-		for i, f := range r.Findings {
-			loc := f.File
-			if f.Line > 0 {
-				loc = fmt.Sprintf("%s:%d", f.File, f.Line)
-			}
-			fmt.Fprintf(&b, "%d. **[%s]** `%s` — %s\n", i+1, f.Severity, loc, f.Title)
-			if d := strings.TrimSpace(f.Detail); d != "" {
-				for _, line := range strings.Split(d, "\n") {
-					fmt.Fprintf(&b, "   %s\n", line)
-				}
-			}
-			b.WriteString("\n")
-		}
+		b.WriteString("\nNo findings.\n")
 	}
-	fmt.Fprintf(&b, "\n<!-- prmax:%s:%s -->\n", r.ID, r.HeadSHA)
-	return b.String()
+	out := strings.TrimRight(b.String(), "\n") + "\n"
+	return out + fmt.Sprintf("\n<!-- prmax:%s:%s -->\n", r.ID, r.HeadSHA)
+}
+
+func fileLink(r model.Review, f model.Finding) string {
+	label := path.Base(f.File)
+	url := fmt.Sprintf("https://github.com/%s/blob/%s/%s", r.Repo, r.HeadSHA, f.File)
+	if f.Line > 0 {
+		label = fmt.Sprintf("%s:%d", label, f.Line)
+		url += fmt.Sprintf("#L%d", f.Line)
+	}
+	return fmt.Sprintf("[`%s`](%s)", label, url)
 }

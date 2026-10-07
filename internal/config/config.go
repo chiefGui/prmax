@@ -14,15 +14,14 @@ type Repo struct {
 }
 
 type Config struct {
-	Listen       string `json:"listen"`
-	Concurrency  int    `json:"concurrency"`
-	ClaudePath   string `json:"claudePath"`
-	GhPath       string `json:"ghPath"`
-	CodexPath    string `json:"codexPath"`
-	Instructions string `json:"instructions"`
-	AppID        string `json:"appId"`
-	AppKey       string `json:"appKey"`
-	Repos        []Repo `json:"repos"`
+	Listen      string `json:"listen"`
+	Concurrency int    `json:"concurrency"`
+	ClaudePath  string `json:"claudePath"`
+	GhPath      string `json:"ghPath"`
+	CodexPath   string `json:"codexPath"`
+	AppID       string `json:"appId"`
+	AppKey      string `json:"appKey"`
+	Repos       []Repo `json:"repos"`
 }
 
 func Root() string {

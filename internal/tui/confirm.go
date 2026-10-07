@@ -24,6 +24,14 @@ type confirmState struct {
 	mdl   int
 	eff   int
 	field int
+	plan  *model.Plan
+	err   string
+}
+
+type planMsg struct {
+	key  string
+	plan model.Plan
+	err  error
 }
 
 func (c *confirmState) init(p model.Providers) {
@@ -117,7 +125,57 @@ func (m Model) openConfirm(p model.PR) (tea.Model, tea.Cmd) {
 		c.init(*m.providers)
 	}
 	m.confirm = c
-	return m, m.loadProviders()
+	return m, tea.Batch(m.loadProviders(), m.loadPlan(p))
+}
+
+func (m Model) loadPlan(p model.PR) tea.Cmd {
+	return func() tea.Msg {
+		pl, err := m.client.Plan(p.Repo, p.Number)
+		return planMsg{key: p.Key(), plan: pl, err: err}
+	}
+}
+
+func (c *confirmState) planLines(width int) []string {
+	switch {
+	case c.err != "":
+		return []string{sRed.Render(clip(c.err, width))}
+	case c.plan == nil:
+		return []string{sDim.Render("Checking what changed…")}
+	}
+	pl := c.plan
+	if pl.Since == "" {
+		note := "full PR"
+		if pl.Rewritten {
+			note = "full PR · history was rewritten since the last review"
+		}
+		return []string{sDim.Render(fmt.Sprintf("Round %d · %s", pl.Round, note))}
+	}
+	issues := fmt.Sprintf("%d issues", pl.SinceIssues)
+	if pl.SinceIssues == 1 {
+		issues = "1 issue"
+	}
+	lines := []string{sDim.Render(fmt.Sprintf("Round %d · since %s (round %d: %s)", pl.Round, short(pl.Since), pl.SinceRound, issues)), ""}
+	const maxShown = 6
+	for i, cm := range pl.Commits {
+		if i == maxShown {
+			lines = append(lines, sDim.Render(fmt.Sprintf("  … %d more", len(pl.Commits)-maxShown)))
+			break
+		}
+		lines = append(lines, "  "+sTitle.Render(short(cm.SHA))+"  "+sText.Render(clip(cm.Title, width-11)))
+	}
+	commits := fmt.Sprintf("%d commits", len(pl.Commits))
+	if len(pl.Commits) == 1 {
+		commits = "this commit"
+	} else if len(pl.Commits) > 1 {
+		commits = "these " + commits
+	}
+	summary := "Reviews " + commits
+	if pl.SinceIssues > 0 {
+		summary += fmt.Sprintf(" and re-checks the %s.", issues)
+	} else {
+		summary += "."
+	}
+	return append(lines, "", sText.Render(summary))
 }
 
 func (m Model) keyConfirm(k tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -185,8 +243,16 @@ func (m Model) viewConfirm() string {
 	boxW := min(84, max(40, m.width-8))
 	inner := boxW - 6
 	var b strings.Builder
-	b.WriteString(sDim.Render("Review") + "  " + sBold.Render(fmt.Sprintf("%s #%d", shortRepo(c.pr.Repo), c.pr.Number)) + "\n")
+	verb := "Review"
+	if c.plan != nil && c.plan.Since != "" {
+		verb = "Re-review"
+	}
+	b.WriteString(sDim.Render(verb) + "  " + sBold.Render(fmt.Sprintf("%s #%d", shortRepo(c.pr.Repo), c.pr.Number)) + "\n")
 	b.WriteString(sDim.Render(clip(c.pr.Title, inner)) + "\n\n")
+	for _, l := range c.planLines(inner) {
+		b.WriteString(l + "\n")
+	}
+	b.WriteString("\n")
 	if !c.ready {
 		b.WriteString(sDim.Render("Loading providers…") + "\n")
 	} else {
