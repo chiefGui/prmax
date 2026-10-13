@@ -30,9 +30,8 @@ typedef struct NetEvent {
 void net_init(HWND notify);
 void net_get(const char *path, int tag, uintptr_t context);
 void net_post(const char *path, const char *body, int tag, uintptr_t context);
-void net_stream(void);
+void net_stream(void (*start_server)(void));
 void net_free_result(NetResult *result);
 void net_free_event(NetEvent *event);
-int net_ping(void);
 
 #endif

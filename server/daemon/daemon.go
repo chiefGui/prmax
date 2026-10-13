@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sys/windows"
+
 	"prmax/config"
 	"prmax/model"
 )
@@ -53,6 +55,7 @@ func Run(cfg config.Config) error {
 	lf, err := os.OpenFile(filepath.Join(dir, "daemon.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err == nil {
 		log.SetOutput(lf)
+		windows.SetStdHandle(windows.STD_ERROR_HANDLE, windows.Handle(lf.Fd()))
 	}
 	store, err := NewStore(dir)
 	if err != nil {

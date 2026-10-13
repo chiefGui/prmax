@@ -8,10 +8,13 @@
 
 #include "yyjson.h"
 
+#define RESTART_MS 5000
+
 static HWND target;
 static HINTERNET session;
 static wchar_t host[64] = L"127.0.0.1";
 static INTERNET_PORT port = 47821;
+static void (*start_server)(void);
 
 typedef struct Request {
     wchar_t method[8];
@@ -226,25 +229,7 @@ static void stream_once(void)
     WinHttpCloseHandle(conn);
 }
 
-static unsigned __stdcall stream_thread(void *arg)
-{
-    (void)arg;
-    for (;;) {
-        stream_once();
-        post_event(EVENT_OFFLINE, 0, 0);
-        Sleep(1000);
-    }
-}
-
-void net_stream(void)
-{
-    HANDLE t = (HANDLE)_beginthreadex(0, 0, stream_thread, 0, 0, 0);
-    if (t) {
-        CloseHandle(t);
-    }
-}
-
-int net_ping(void)
+static int ping(void)
 {
     HINTERNET conn = 0;
     HINTERNET req = open_request(&conn, L"GET", L"/api/state");
@@ -256,4 +241,28 @@ int net_ping(void)
     WinHttpCloseHandle(req);
     WinHttpCloseHandle(conn);
     return ok;
+}
+
+static unsigned __stdcall stream_thread(void *arg)
+{
+    (void)arg;
+    ULONGLONG started = 0;
+    for (;;) {
+        if (GetTickCount64() - started > RESTART_MS && !ping()) {
+            start_server();
+            started = GetTickCount64();
+        }
+        stream_once();
+        post_event(EVENT_OFFLINE, 0, 0);
+        Sleep(1000);
+    }
+}
+
+void net_stream(void (*start)(void))
+{
+    start_server = start;
+    HANDLE t = (HANDLE)_beginthreadex(0, 0, stream_thread, 0, 0, 0);
+    if (t) {
+        CloseHandle(t);
+    }
 }

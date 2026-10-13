@@ -80,11 +80,8 @@ static void schedule(void)
     }
 }
 
-static void start_daemon(void)
+static void start_server(void)
 {
-    if (net_ping()) {
-        return;
-    }
     wchar_t path[MAX_PATH], cmd[MAX_PATH + 24];
     DWORD n = GetModuleFileNameW(0, path, MAX_PATH);
     while (n > 0 && path[n - 1] != L'\\') {
@@ -126,7 +123,7 @@ static LRESULT CALLBACK proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         ui_init();
         apply_theme();
         resize();
-        net_stream();
+        net_stream(start_server);
         return 0;
     case WM_SIZE:
         resize();
@@ -214,7 +211,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     (void)prev;
     (void)cmdline;
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-    start_daemon();
     WNDCLASSEXW wc = {sizeof wc};
     wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = proc;
