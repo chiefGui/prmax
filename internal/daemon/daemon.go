@@ -144,7 +144,7 @@ func (d *Daemon) request(key string, req model.ReviewRequest) error {
 		return fmt.Errorf("already queued")
 	}
 	d.pending[key] = req
-	go saveChoice(req)
+	saveChoice(req)
 	d.setStatus(key, model.StatusQueued)
 	d.queue <- key
 	return nil

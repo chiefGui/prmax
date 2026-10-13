@@ -1,0 +1,3 @@
+[submodule "desktop/vendor/vogue"]
+	path = desktop/vendor/vogue
+	url = https://github.com/chiefgui/vogue

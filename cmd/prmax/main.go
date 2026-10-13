@@ -4,14 +4,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-
+	"prmax/internal/client"
 	"prmax/internal/config"
 	"prmax/internal/daemon"
 	"prmax/internal/proc"
-	"prmax/internal/tui"
 )
 
 func main() {
@@ -24,15 +23,15 @@ func main() {
 		return
 	}
 	if cmd == "install" || cmd == "uninstall" {
-		client := tui.NewClient(config.Default().Listen)
+		api := client.New(config.Default().Listen)
 		if cfg, err := config.Load(); err == nil {
-			client = tui.NewClient(cfg.Listen)
+			api = client.New(cfg.Listen)
 		}
 		run := install
 		if cmd == "uninstall" {
 			run = uninstall
 		}
-		if err := run(client); err != nil {
+		if err := run(api); err != nil {
 			fail(err)
 		}
 		return
@@ -41,27 +40,27 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
-	client := tui.NewClient(cfg.Listen)
+	api := client.New(cfg.Listen)
 	switch cmd {
 	case "daemon":
 		if err := daemon.Run(cfg); err != nil {
 			fail(err)
 		}
 	case "stop":
-		if err := client.Shutdown(); err != nil {
+		if err := api.Shutdown(); err != nil {
 			fail(fmt.Errorf("daemon not running"))
 		}
 		fmt.Println("daemon stopped")
 	case "start":
-		if err := ensureDaemon(client); err != nil {
+		if err := ensureDaemon(api); err != nil {
 			fail(err)
 		}
 		fmt.Println("daemon running on", cfg.Listen)
 	case "":
-		if err := ensureDaemon(client); err != nil {
+		if err := ensureDaemon(api); err != nil {
 			fail(err)
 		}
-		if _, err := tea.NewProgram(tui.New(client), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run(); err != nil {
+		if err := openDesktop(); err != nil {
 			fail(err)
 		}
 	default:
@@ -70,7 +69,17 @@ func main() {
 	}
 }
 
-func ensureDaemon(client *tui.Client) error {
+const desktopExe = "prmax-desktop.exe"
+
+func openDesktop() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	return proc.Open(filepath.Join(filepath.Dir(exe), desktopExe))
+}
+
+func ensureDaemon(client *client.Client) error {
 	if client.Ping() == nil {
 		return nil
 	}

@@ -14,12 +14,12 @@ import (
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 
+	"prmax/internal/client"
 	"prmax/internal/config"
 	"prmax/internal/proc"
-	"prmax/internal/tui"
 )
 
-func install(client *tui.Client) error {
+func install(client *client.Client) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -33,17 +33,15 @@ func install(client *tui.Client) error {
 		if err := os.MkdirAll(config.BinDir(), 0o755); err != nil {
 			return err
 		}
-		old := dst + ".old"
-		os.Remove(old)
-		if _, err := os.Stat(dst); err == nil {
-			if err := os.Rename(dst, old); err != nil {
+		if err := place(exe, dst); err != nil {
+			return err
+		}
+		desktop := filepath.Join(filepath.Dir(exe), desktopExe)
+		if _, err := os.Stat(desktop); err == nil {
+			if err := place(desktop, filepath.Join(config.BinDir(), desktopExe)); err != nil {
 				return err
 			}
 		}
-		if err := copyFile(exe, dst); err != nil {
-			return err
-		}
-		os.Remove(old)
 	}
 	if err := addToPath(config.BinDir()); err != nil {
 		return err
@@ -57,7 +55,23 @@ func install(client *tui.Client) error {
 	return nil
 }
 
-func uninstall(client *tui.Client) error {
+func place(src, dst string) error {
+	old := dst + ".old"
+	os.Remove(old)
+	if _, err := os.Stat(dst); err == nil {
+		if err := os.Rename(dst, old); err != nil {
+			return err
+		}
+	}
+	if err := copyFile(src, dst); err != nil {
+		return err
+	}
+	os.Remove(old)
+	return nil
+}
+
+func uninstall(client *client.Client) error {
+	exec.Command("taskkill", "/IM", desktopExe, "/F").Run()
 	if client.Ping() == nil {
 		client.Shutdown()
 		time.Sleep(2 * time.Second)

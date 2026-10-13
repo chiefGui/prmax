@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -210,8 +211,9 @@ func (d *Daemon) execute(ctx context.Context, j *job) error {
 	if err != nil {
 		return err
 	}
-	if len(j.reported) == 0 {
-		for i := range res.Findings {
+	for i := range res.Findings {
+		res.Findings[i].File = repoPath(wt, res.Findings[i].File)
+		if len(j.reported) == 0 {
 			res.Findings[i].StillOpen = false
 		}
 	}
@@ -523,4 +525,13 @@ func (d *Daemon) repost(key string) {
 	if err != nil {
 		log.Printf("repost %s: %v", key, err)
 	}
+}
+
+func repoPath(root, file string) string {
+	if filepath.IsAbs(file) {
+		if rel, err := filepath.Rel(root, file); err == nil && !strings.HasPrefix(rel, "..") {
+			file = rel
+		}
+	}
+	return filepath.ToSlash(file)
 }
