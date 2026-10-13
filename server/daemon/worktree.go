@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"prmax/internal/config"
+	"prmax/config"
 )
 
 var lfsSkip = []string{"GIT_LFS_SKIP_SMUDGE=1"}

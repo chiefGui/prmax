@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"prmax/internal/config"
-	"prmax/internal/model"
-	"prmax/internal/proc"
+	"prmax/config"
+	"prmax/model"
+	"prmax/proc"
 )
 
 func resolveCodex(p string) string {

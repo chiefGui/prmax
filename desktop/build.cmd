@@ -10,7 +10,7 @@ call "%VS%\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
 cd /d "%~dp0"
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release || exit /b 1
 cmake --build build || exit /b 1
-del ..\bin\prmax-desktop.old 2>nul
-if exist ..\bin\prmax-desktop.exe move /y ..\bin\prmax-desktop.exe ..\bin\prmax-desktop.old >nul
-copy /y build\prmax-desktop.exe ..\bin\prmax-desktop.exe >nul || exit /b 1
-del ..\bin\prmax-desktop.old 2>nul
+del ..\bin\prmax.old 2>nul
+if exist ..\bin\prmax.exe move /y ..\bin\prmax.exe ..\bin\prmax.old >nul
+copy /y build\prmax.exe ..\bin\prmax.exe >nul || exit /b 1
+del ..\bin\prmax.old 2>nul

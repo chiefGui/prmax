@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"prmax/internal/config"
-	"prmax/internal/model"
-	"prmax/internal/proc"
+	"prmax/config"
+	"prmax/model"
+	"prmax/proc"
 )
 
 const reviewSchema = `{

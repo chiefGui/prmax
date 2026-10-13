@@ -88,22 +88,3 @@ func Detach(cmd *exec.Cmd) {
 		CreationFlags: windows.CREATE_NO_WINDOW | windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_BREAKAWAY_FROM_JOB,
 	}
 }
-
-func DetachFallback(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow:    true,
-		CreationFlags: windows.CREATE_NO_WINDOW | windows.CREATE_NEW_PROCESS_GROUP,
-	}
-}
-
-func Open(path string) error {
-	var err error
-	for _, flags := range []uint32{windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_BREAKAWAY_FROM_JOB, windows.CREATE_NEW_PROCESS_GROUP} {
-		c := exec.Command(path)
-		c.SysProcAttr = &syscall.SysProcAttr{CreationFlags: flags}
-		if err = c.Start(); err == nil {
-			return c.Process.Release()
-		}
-	}
-	return err
-}

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"prmax/internal/model"
-	"prmax/internal/proc"
+	"prmax/model"
+	"prmax/proc"
 )
 
 const toastApp = `{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe`

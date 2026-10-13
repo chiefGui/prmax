@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"prmax/internal/model"
+	"prmax/model"
 )
 
 const maxReviewsPerPR = 20

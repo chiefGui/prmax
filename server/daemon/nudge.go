@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"prmax/internal/config"
-	"prmax/internal/model"
+	"prmax/config"
+	"prmax/model"
 )
 
 type desktopSession struct {

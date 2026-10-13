@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"prmax/internal/config"
-	"prmax/internal/model"
+	"prmax/config"
+	"prmax/model"
 )
 
 type running struct {

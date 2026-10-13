@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"prmax/internal/model"
-	"prmax/internal/proc"
+	"prmax/model"
+	"prmax/proc"
 )
 
 func (d *Daemon) forward(ctx context.Context, repo string) {

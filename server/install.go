@@ -14,44 +14,57 @@ import (
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 
-	"prmax/internal/client"
-	"prmax/internal/config"
-	"prmax/internal/proc"
+	"prmax/config"
+	"prmax/proc"
 )
 
-func install(client *client.Client) error {
+func install(listen string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	dst := filepath.Join(config.BinDir(), "prmax.exe")
-	if !samePath(exe, dst) {
-		if client.Ping() == nil {
-			client.Shutdown()
+	bin := config.BinDir()
+	app := filepath.Join(bin, appExe)
+	if !samePath(exe, filepath.Join(bin, serverExe)) {
+		exec.Command("taskkill", "/IM", appExe, "/F").Run()
+		if ping(listen) == nil {
+			shutdown(listen)
 			time.Sleep(2 * time.Second)
 		}
-		if err := os.MkdirAll(config.BinDir(), 0o755); err != nil {
+		if err := os.MkdirAll(bin, 0o755); err != nil {
 			return err
 		}
-		if err := place(exe, dst); err != nil {
-			return err
-		}
-		desktop := filepath.Join(filepath.Dir(exe), desktopExe)
-		if _, err := os.Stat(desktop); err == nil {
-			if err := place(desktop, filepath.Join(config.BinDir(), desktopExe)); err != nil {
+		for _, name := range []string{serverExe, appExe} {
+			if err := place(filepath.Join(filepath.Dir(exe), name), filepath.Join(bin, name)); err != nil {
 				return err
 			}
 		}
+		os.Remove(filepath.Join(bin, "prmax-desktop.exe"))
 	}
-	if err := addToPath(config.BinDir()); err != nil {
+	removeFromPath(bin)
+	if err := shortcut(app); err != nil {
 		return err
 	}
 	if _, err := config.Load(); err != nil {
 		fmt.Println(err)
 	}
-	fmt.Println("installed", dst)
+	fmt.Println("installed", app)
 	fmt.Println("config   ", config.Path())
-	fmt.Println("open a new terminal and run: prmax")
+	return nil
+}
+
+func shortcutPath() string {
+	return filepath.Join(os.Getenv("APPDATA"), "Microsoft", "Windows", "Start Menu", "Programs", "prmax.lnk")
+}
+
+func shortcut(target string) error {
+	script := fmt.Sprintf(`$s = (New-Object -ComObject WScript.Shell).CreateShortcut('%s'); $s.TargetPath = '%s'; $s.WorkingDirectory = '%s'; $s.Save()`,
+		shortcutPath(), target, filepath.Dir(target))
+	c := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	proc.Hide(c)
+	if out, err := c.CombinedOutput(); err != nil {
+		return fmt.Errorf("shortcut: %v %s", err, out)
+	}
 	return nil
 }
 
@@ -70,10 +83,10 @@ func place(src, dst string) error {
 	return nil
 }
 
-func uninstall(client *client.Client) error {
-	exec.Command("taskkill", "/IM", desktopExe, "/F").Run()
-	if client.Ping() == nil {
-		client.Shutdown()
+func uninstall(listen string) error {
+	exec.Command("taskkill", "/IM", appExe, "/F").Run()
+	if ping(listen) == nil {
+		shutdown(listen)
 		time.Sleep(2 * time.Second)
 	}
 	root := config.Root()
@@ -82,9 +95,8 @@ func uninstall(client *client.Client) error {
 			cleanRepo(r, root)
 		}
 	}
-	if err := removeFromPath(config.BinDir()); err != nil {
-		fmt.Println("path:", err)
-	}
+	os.Remove(shortcutPath())
+	removeFromPath(config.BinDir())
 	exe, _ := os.Executable()
 	if strings.HasPrefix(strings.ToLower(exe), strings.ToLower(root)+string(os.PathSeparator)) {
 		c := exec.Command("cmd", "/c", fmt.Sprintf(`ping -n 3 127.0.0.1 >nul & rmdir /s /q "%s"`, root))
@@ -159,25 +171,6 @@ func userPath() (registry.Key, []string, error) {
 		}
 	}
 	return k, parts, nil
-}
-
-func addToPath(dir string) error {
-	k, parts, err := userPath()
-	if err != nil {
-		return err
-	}
-	defer k.Close()
-	for _, p := range parts {
-		if strings.EqualFold(strings.TrimRight(p, `\`), strings.TrimRight(dir, `\`)) {
-			return nil
-		}
-	}
-	parts = append([]string{dir}, parts...)
-	if err := k.SetExpandStringValue("Path", strings.Join(parts, ";")); err != nil {
-		return err
-	}
-	broadcastEnv()
-	return nil
 }
 
 func removeFromPath(dir string) error {

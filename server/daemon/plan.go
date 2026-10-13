@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"prmax/internal/model"
+	"prmax/model"
 )
 
 func (d *Daemon) plan(ctx context.Context, key string) (model.Plan, error) {

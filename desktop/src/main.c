@@ -85,16 +85,18 @@ static void start_daemon(void)
     if (net_ping()) {
         return;
     }
-    wchar_t path[MAX_PATH], cmd[MAX_PATH + 16];
+    wchar_t path[MAX_PATH], cmd[MAX_PATH + 24];
     DWORD n = GetModuleFileNameW(0, path, MAX_PATH);
     while (n > 0 && path[n - 1] != L'\\') {
         n--;
     }
     path[n] = 0;
-    wsprintfW(cmd, L"\"%sprmax.exe\" start", path);
+    wsprintfW(cmd, L"\"%sprmax-server.exe\"", path);
     STARTUPINFOW si = {sizeof si};
     PROCESS_INFORMATION pi;
-    if (CreateProcessW(0, cmd, 0, 0, FALSE, CREATE_NO_WINDOW, 0, 0, &si, &pi)) {
+    DWORD flags = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP;
+    if (CreateProcessW(0, cmd, 0, 0, FALSE, flags | CREATE_BREAKAWAY_FROM_JOB, 0, 0, &si, &pi) ||
+        CreateProcessW(0, cmd, 0, 0, FALSE, flags, 0, 0, &si, &pi)) {
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
     }

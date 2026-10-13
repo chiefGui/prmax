@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"prmax/internal/model"
+	"prmax/model"
 )
 
 type webhookPR struct {

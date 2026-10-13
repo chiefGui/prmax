@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"prmax/internal/model"
-	"prmax/internal/proc"
+	"prmax/model"
+	"prmax/proc"
 )
 
 func run(ctx context.Context, dir string, env []string, stdin string, name string, args ...string) (string, error) {

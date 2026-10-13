@@ -5,7 +5,7 @@ import (
 	"path"
 	"strings"
 
-	"prmax/internal/model"
+	"prmax/model"
 )
 
 func renderComment(r model.Review) string {
