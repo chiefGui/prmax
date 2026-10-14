@@ -43,7 +43,7 @@ void ui_resize(float width, float height)
 {
     view_w = width;
     view_h = height;
-    Clay_SetLayoutDimensions((Clay_Dimensions){width, height});
+    kit_resize(width, height);
 }
 
 static void build(void)

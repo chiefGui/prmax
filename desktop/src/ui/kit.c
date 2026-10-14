@@ -15,6 +15,7 @@ int kit_bar, kit_shadow;
 
 static char arena[1 << 18];
 static size_t arena_used;
+static Clay_Dimensions viewport;
 static Hit hits[2][HIT_MAX];
 static int hit_count[2];
 static int building, ready = 1;
@@ -65,6 +66,18 @@ void kit_init(void)
     vogue_context_init(&vogue);
     Clay_Initialize(Clay_CreateArenaWithCapacityAndMemory(size, malloc(size)), (Clay_Dimensions){0, 0}, (Clay_ErrorHandler){report, 0});
     Clay_SetMeasureTextFunction(measure, 0);
+    Clay_SetCullingEnabled(false);
+}
+
+void kit_resize(float width, float height)
+{
+    viewport = (Clay_Dimensions){width, height};
+    Clay_SetLayoutDimensions(viewport);
+}
+
+static int visible(Clay_BoundingBox b)
+{
+    return b.x < viewport.width && b.y < viewport.height && b.x + b.width > 0 && b.y + b.height > 0;
 }
 
 Clay_RenderCommandArray kit_layout(void (*build)(void))
@@ -257,6 +270,10 @@ void kit_render(Clay_RenderCommandArray commands, double now)
     for (int i = 0; i < commands.length; i++) {
         Clay_RenderCommand *cmd = Clay_RenderCommandArray_Get(&commands, i);
         Clay_BoundingBox b = cmd->boundingBox;
+        int clip = cmd->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_START || cmd->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
+        if (!clip && !visible(b)) {
+            continue;
+        }
         switch (cmd->commandType) {
         case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
             float r = radius(cmd->renderData.rectangle.cornerRadius, b);

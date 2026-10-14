@@ -26,6 +26,7 @@ extern const Clay_Color CLEAR;
 extern int kit_bar, kit_shadow;
 
 void kit_init(void);
+void kit_resize(float width, float height);
 void kit_theme(int light);
 Clay_RenderCommandArray kit_layout(void (*build)(void));
 void kit_render(Clay_RenderCommandArray commands, double now);
